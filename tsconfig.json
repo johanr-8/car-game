@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "paths": {
+      "@core/*": ["./src/core/*"],
+      "@car/*":  ["./src/car/*"],
+      "@world/*": ["./src/world/*"],
+      "@ui/*":   ["./src/ui/*"],
+      "@audio/*": ["./src/audio/*"]
+    }
+  },
+  "include": ["src"]
+}

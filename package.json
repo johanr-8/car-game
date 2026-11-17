@@ -1,0 +1,32 @@
+{
+  "name": "gravity-drift",
+  "version": "0.1.0",
+  "description": "Warp City: Gravity Drift — arcade racer on walls and ceilings",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "threejs",
+    "arcade",
+    "racing",
+    "webgl"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.170.0",
+    "three-mesh-bvh": "^0.9.18"
+  },
+  "devDependencies": {
+    "@rollup/wasm-node": "^4.68.5",
+    "@types/three": "^0.170.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.1",
+    "vitest": "^5.1.0"
+  }
+}
