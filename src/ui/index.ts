@@ -3,3 +3,4 @@
  */
 export { DebugOverlay } from './DebugOverlay';
 export { RaceHUD }      from './RaceHUD';
+export { DevTuningPanel } from './DevTuningPanel';

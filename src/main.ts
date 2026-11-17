@@ -36,6 +36,7 @@ import { GhostModel } from './car/GhostModel';
 
 import { DebugOverlay } from './ui/DebugOverlay';
 import { RaceHUD } from './ui/RaceHUD';
+import { DevTuningPanel } from './ui/DevTuningPanel';
 
 // ── Scratch Objects for Zero Per-Frame Allocations ───────────
 const _interpPos   = new THREE.Vector3();
@@ -124,6 +125,7 @@ const composer = createComposer(renderer, scene, chaseCamera.camera);
 const stats    = new StatsCollector();
 const debug    = new DebugOverlay();
 const raceHUD  = new RaceHUD();
+new DevTuningPanel();
 
 // ── Race State Variables ─────────────────────────────────────
 let countdownTimer = 3.0; // 3-2-1-GO!
@@ -191,6 +193,9 @@ function restartRace(): void {
   carCtrl.surfaceNormal.set(0, 1, 0);
   carCtrl.speed = 0;
   carCtrl.isGrounded = true;
+  carCtrl.isDrifting = false;
+  carCtrl.driftTransition = 0;
+  carCtrl.brakeDeadzoneTimer = 0;
 
   carModel.group.position.copy(carCtrl.position);
   carModel.group.quaternion.copy(carCtrl.quaternion);

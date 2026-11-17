@@ -77,6 +77,8 @@ export class ArcadeCarController {
   speed = 0;             // forward scalar speed (units/s)
   isGrounded = true;
   isDrifting = false;
+  driftTransition = 0;   // 0 (normal grip) to 1 (full drift)
+  brakeDeadzoneTimer = 0; // standstill delay before reverse acceleration
   steerVisual = 0;       // smoothed steer visual angle
 
   // Boost and status effects
@@ -188,13 +190,15 @@ export class ArcadeCarController {
     const effectiveMaxSpeed = this.boostActive ? C.maxSpeed * 1.5 : C.maxSpeed;
 
     if (this.isGrounded) {
-      // ── Throttle & Boost ──
+      // ── Throttle, Braking & Reversing with 0.12s Dead-Stop Transition ──
       if (input.throttle > 0 || this.boostActive) {
+        this.brakeDeadzoneTimer = 0;
         if (this.speed < 0) {
+          // Braking out of reverse
           this.speed += C.brakeForce * dt;
           if (this.speed > 0) this.speed = 0;
         } else if (this.speed < effectiveMaxSpeed) {
-          // Progressive supercar torque curve: punchy low-gear pull, natural aerodynamic taper
+          // Progressive supercar torque curve
           const speedRatio = Math.min(Math.abs(this.speed) / effectiveMaxSpeed, 1.0);
           const torqueCurve = Math.max(0.35, 1.0 - speedRatio * 0.65);
           const accel = (C.acceleration * torqueCurve) + (this.boostActive ? this.boostForce : 0);
@@ -202,12 +206,31 @@ export class ArcadeCarController {
           if (this.speed > effectiveMaxSpeed) this.speed = effectiveMaxSpeed;
         }
       } else if (input.brake > 0) {
-        if (this.speed > 0.5) {
+        if (this.speed > 0) {
+          // Braking while moving forward
           this.speed -= C.brakeForce * input.brake * dt;
-          if (this.speed < 0) this.speed = 0;
+          if (this.speed <= 0) {
+            this.speed = 0;
+            this.brakeDeadzoneTimer = C.brakeDeadzoneTime; // 0.12s pause before reversing
+          }
+        } else if (this.speed === 0) {
+          // At standstill: enforce 0.12s dead-stop pause before reverse throttle engages
+          if (this.brakeDeadzoneTimer > 0) {
+            this.brakeDeadzoneTimer -= dt;
+            this.speed = 0;
+          } else {
+            this.speed -= C.reverseAccel * input.brake * dt;
+            if (this.speed < -C.reverseMaxSpeed) this.speed = -C.reverseMaxSpeed;
+          }
         } else {
+          // Already reversing
           this.speed -= C.reverseAccel * input.brake * dt;
           if (this.speed < -C.reverseMaxSpeed) this.speed = -C.reverseMaxSpeed;
+        }
+      } else {
+        // Brake released
+        if (this.speed >= 0) {
+          this.brakeDeadzoneTimer = 0;
         }
       }
 
@@ -218,25 +241,54 @@ export class ArcadeCarController {
       }
       this.speed *= (1 - C.drag * dt);
 
-      // ── Local-Axis Steering (Always natural from driver view) ──
+      // ── Drift State & Smooth 0.15s Grip Blend ──
       const absSpeed = Math.abs(this.speed);
+      const canDrift = input.drift && absSpeed > C.driftEntrySpeed;
+      this.isDrifting = canDrift;
+
+      const targetDrift = canDrift ? 1.0 : 0.0;
+      const blendRate = 1.0 / C.driftTransitionTime;
+      if (this.driftTransition < targetDrift) {
+        this.driftTransition = Math.min(targetDrift, this.driftTransition + blendRate * dt);
+      } else if (this.driftTransition > targetDrift) {
+        this.driftTransition = Math.max(targetDrift, this.driftTransition - blendRate * dt);
+      }
+
+      // ── Local-Axis Steering with Counter-Steer Assist ──
       const speedFactor = 1 - C.steerSpeedDecay * (absSpeed / effectiveMaxSpeed);
       const steerSign = this.speed >= 0 ? 1 : -1;
-
-      this.isDrifting = input.drift && absSpeed > C.driftEntrySpeed;
-      const driftMul = this.isDrifting ? C.driftSteerBoost : 1.0;
+      const driftMul = 1.0 + (C.driftSteerBoost - 1.0) * this.driftTransition;
 
       if (input.steer !== 0) {
-        // Rotate strictly around LOCAL Y-axis (up direction of the car)
-        const turnAngle = -input.steer * C.steerSpeed * speedFactor * driftMul * steerSign * dt;
+        let turnAngle = -input.steer * C.steerSpeed * speedFactor * driftMul * steerSign * dt;
+
+        // Counter-steer assist: boost angular control when steering against lateral slide
+        const currentLatSpeed = this.velocity.dot(_rightTan);
+        if (this.driftTransition > 0.05 && Math.abs(currentLatSpeed) > 0.5) {
+          const isCounterSteering = (input.steer * currentLatSpeed < 0);
+          if (isCounterSteering) {
+            turnAngle *= 1.25;
+          }
+        }
+
         _qTurn.setFromAxisAngle(_localY, turnAngle);
-        this.quaternion.multiply(_qTurn); // Local multiplication on right
+        this.quaternion.multiply(_qTurn);
         this.steerVisual = input.steer;
       } else {
         this.steerVisual *= Math.exp(-C.steerReturnSpeed * dt);
+
+        // Drift recovery assist: gently align car heading with motion vector on releasing drift
+        if (this.driftTransition > 0.02 && !this.isDrifting) {
+          const latSpeedNow = this.velocity.dot(_rightTan);
+          if (Math.abs(latSpeedNow) > 0.4) {
+            const recoveryTurn = -Math.sign(latSpeedNow) * Math.min(1.0, Math.abs(latSpeedNow) / 10.0) * 1.5 * dt;
+            _qTurn.setFromAxisAngle(_localY, recoveryTurn);
+            this.quaternion.multiply(_qTurn);
+          }
+        }
       }
 
-      // ── Build Tangential Velocity on Surface ──
+      // ── Build Tangential Velocity & Time-Based Lateral Friction Decay ──
       _fwd.set(0, 0, -1).applyQuaternion(this.quaternion);
       _right.set(1, 0, 0).applyQuaternion(this.quaternion);
 
@@ -249,8 +301,16 @@ export class ArcadeCarController {
       }
       _fwdTan.crossVectors(this.surfaceNormal, _rightTan).normalize();
 
-      const grip = this.isDrifting ? C.gripDrift : C.gripNormal;
-      const latSpeed = this.velocity.dot(_rightTan) * (1 - grip);
+      // Effective lateral friction blended exponentially over drift transition
+      const lateralFriction = THREE.MathUtils.lerp(
+        C.lateralFrictionNormal,
+        C.lateralFrictionDrift,
+        this.driftTransition
+      );
+
+      // Time-based exponential decay: lateralVel *= Math.exp(-lateralFriction * dt)
+      const prevLatSpeed = this.velocity.dot(_rightTan);
+      const latSpeed = prevLatSpeed * Math.exp(-lateralFriction * dt);
 
       _fwdVel.copy(_fwdTan).multiplyScalar(this.speed);
       _latVel.copy(_rightTan).multiplyScalar(latSpeed);
