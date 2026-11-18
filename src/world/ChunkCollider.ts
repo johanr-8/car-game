@@ -30,6 +30,8 @@ export interface SolidBox {
   height: number;
   depth: number;
   rotationY?: number;
+  rotationX?: number;
+  rotationZ?: number;
 }
 
 const invisibleCollisionMat = new THREE.MeshBasicMaterial({
@@ -57,8 +59,14 @@ export class ChunkCollider {
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i];
       const g = new THREE.BoxGeometry(b.width, b.height, b.depth);
+      if (b.rotationX) {
+        g.rotateX(b.rotationX);
+      }
       if (b.rotationY) {
         g.rotateY(b.rotationY);
+      }
+      if (b.rotationZ) {
+        g.rotateZ(b.rotationZ);
       }
       g.translate(b.x, b.y, b.z);
       boxGeos.push(g);

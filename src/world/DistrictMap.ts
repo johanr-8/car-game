@@ -54,9 +54,9 @@ export const DISTRICT_CONFIGS: Record<DistrictType, DistrictConfig> = {
   [DistrictType.DOWNTOWN]: {
     type: DistrictType.DOWNTOWN,
     label: 'Downtown Metropolis',
-    minHeight: 65,
-    maxHeight: 145,
-    minLotSize: 22,
+    minHeight: 28,
+    maxHeight: 135,
+    minLotSize: 14,
     maxLotSize: 26,
     setback: 3,
     styles: [BuildingStyle.GLASS, BuildingStyle.STEEL, BuildingStyle.CONCRETE],
@@ -264,8 +264,8 @@ export class DistrictMap {
         }
       }
 
-      // Summit Lookout: Alpine wilderness and mountain crags
-      else if (nearestTown.type === TownType.SUMMIT) {
+      // Summit Lookout & Pass Gateway: Alpine wilderness, mountain crags, and scenic pass
+      else if (nearestTown.type === TownType.SUMMIT || (nearestTown.type === TownType.TOWN && nearestTown.name.includes('Pass Gateway'))) {
         return DistrictType.OPEN_GREEN;
       }
 

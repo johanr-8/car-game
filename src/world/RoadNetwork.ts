@@ -542,22 +542,26 @@ function sampleSplinePoints(
   const maxGrade = cfg.maxGrade;
   const speedMps = cfg.speedLimit / 3.6;
 
-  // 1. Chaikin corner rounding on raw grid points
-  const smoothed: Array<{ x: number; z: number }> = [];
-  smoothed.push(rawPoints[0]);
+  // 1. Chaikin corner rounding on raw grid points (multi-pass for smooth curves)
+  let smoothed: Array<{ x: number; z: number }> = rawPoints;
+  const chaikinPasses = rawPoints.length > 2 ? 2 : 1;
 
-  for (let i = 0; i < rawPoints.length - 1; i++) {
-    const p0 = rawPoints[i];
-    const p1 = rawPoints[i + 1];
-    smoothed.push(
-      { x: p0.x * 0.75 + p1.x * 0.25, z: p0.z * 0.75 + p1.z * 0.25 },
-      { x: p0.x * 0.25 + p1.x * 0.75, z: p0.z * 0.25 + p1.z * 0.75 }
-    );
+  for (let pass = 0; pass < chaikinPasses; pass++) {
+    const nextSmoothed: Array<{ x: number; z: number }> = [smoothed[0]];
+    for (let i = 0; i < smoothed.length - 1; i++) {
+      const p0 = smoothed[i];
+      const p1 = smoothed[i + 1];
+      nextSmoothed.push(
+        { x: p0.x * 0.75 + p1.x * 0.25, z: p0.z * 0.75 + p1.z * 0.25 },
+        { x: p0.x * 0.25 + p1.x * 0.75, z: p0.z * 0.25 + p1.z * 0.75 }
+      );
+    }
+    nextSmoothed.push(smoothed[smoothed.length - 1]);
+    smoothed = nextSmoothed;
   }
-  smoothed.push(rawPoints[rawPoints.length - 1]);
 
-  // 2. Sample along smoothed path every ~12 meters
-  const sampleSpacing = 12.0;
+  // 2. Sample along smoothed path (~8m for mountain hairpins, ~12m for general roads)
+  const sampleSpacing = roadClass === RoadClass.MOUNTAIN ? 8.0 : 12.0;
   const polyPoints: Array<{ x: number; z: number }> = [smoothed[0]];
 
   let accumulatedDist = 0;
@@ -605,6 +609,15 @@ function sampleSplinePoints(
 
   for (let i = 0; i < n; i++) {
     elevs[i] = landforms.getHeight(polyPoints[i].x, polyPoints[i].z);
+  }
+  elevs[0] = y0;
+  elevs[n - 1] = y1;
+
+  // 3b. Moving-average relaxation filter to eliminate micro-bumps and sawtooth polygon kinks
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 1; i < n - 1; i++) {
+      elevs[i] = (elevs[i - 1] + elevs[i] * 2 + elevs[i + 1]) * 0.25;
+    }
   }
   elevs[0] = y0;
   elevs[n - 1] = y1;
@@ -1016,16 +1029,16 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
     roadClass: RoadClass;
     extraWaypoints?: Array<{ x: number; z: number }>;
   }> = [
-    // 1. Downtown <-> Industrial [Northwest Highway]
-    { fromId: dtGwInd, toId: indGwDowntown, roadClass: RoadClass.HIGHWAY },
-    // 2. Downtown <-> Pass Gateway [Northeast Highway]
-    { fromId: dtGwPass, toId: passGwDowntown, roadClass: RoadClass.HIGHWAY },
-    // 3. Downtown <-> Lakeside [Southeast Avenue]
-    { fromId: dtGwLake, toId: lakeGwDowntown, roadClass: RoadClass.AVENUE },
-    // 4. Downtown <-> Farm [South Avenue]
-    { fromId: dtGwFarm, toId: farmGwDowntown, roadClass: RoadClass.AVENUE },
-    // 5. Downtown <-> Coastal Pines [Southwest Avenue]
-    { fromId: dtGwCp, toId: cpGwDowntown, roadClass: RoadClass.AVENUE },
+    // 1. Downtown <-> Industrial [Northwest Highway] (orthogonal exit from northern grid avenue)
+    { fromId: dtGwInd, toId: indGwDowntown, roadClass: RoadClass.HIGHWAY, extraWaypoints: [{ x: -64 * scale, z: 240 * scale }] },
+    // 2. Downtown <-> Pass Gateway [Northeast Highway] (orthogonal exit from northern grid avenue)
+    { fromId: dtGwPass, toId: passGwDowntown, roadClass: RoadClass.HIGHWAY, extraWaypoints: [{ x: 64 * scale, z: 240 * scale }] },
+    // 3. Downtown <-> Lakeside [Southeast Avenue] (orthogonal exit from southern grid avenue)
+    { fromId: dtGwLake, toId: lakeGwDowntown, roadClass: RoadClass.AVENUE, extraWaypoints: [{ x: 128 * scale, z: -240 * scale }] },
+    // 4. Downtown <-> Farm [South Avenue] (clean southern continuation of central avenue)
+    { fromId: dtGwFarm, toId: farmGwDowntown, roadClass: RoadClass.AVENUE, extraWaypoints: [{ x: 0, z: -240 * scale }] },
+    // 5. Downtown <-> Coastal Pines [Southwest Avenue] (orthogonal exit from southern grid avenue)
+    { fromId: dtGwCp, toId: cpGwDowntown, roadClass: RoadClass.AVENUE, extraWaypoints: [{ x: -128 * scale, z: -240 * scale }] },
     // 6. Downtown <-> Port [West Highway]
     { fromId: dtGwPort, toId: portGwDowntown, roadClass: RoadClass.HIGHWAY },
 

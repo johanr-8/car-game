@@ -124,6 +124,26 @@ const guardrailMat = new THREE.MeshStandardMaterial({
   metalness: 0.85,
 });
 
+const mountainKerbRedMat = new THREE.MeshStandardMaterial({
+  color: 0xdc2626,
+  roughness: 0.65,
+  metalness: 0.15,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -3,
+  polygonOffsetUnits: -3,
+});
+
+const mountainKerbWhiteMat = new THREE.MeshStandardMaterial({
+  color: 0xf8fafc,
+  roughness: 0.65,
+  metalness: 0.15,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -3,
+  polygonOffsetUnits: -3,
+});
+
 const roundaboutCenterMat = new THREE.MeshStandardMaterial({
   map: terrainDetailTex,
   color: 0x3d702d,
@@ -610,6 +630,14 @@ export class TerrainChunk {
     const nodes = roadIndex.graph.nodes;
     const landforms = terrainHeight.landforms;
 
+    // Precompute node degrees to distinguish genuine intersections (degree >= 3)
+    // from 2-way road joints and sharp mountain hairpin curves.
+    const nodeDegree = new Int16Array(nodes.length);
+    for (let e = 0; e < edges.length; e++) {
+      nodeDegree[edges[e].fromNodeId]++;
+      nodeDegree[edges[e].toNodeId]++;
+    }
+
     // ── 1. Build Road Polylines & Draped Ribbons ──────────────
     for (let i = 0; i < edges.length; i++) {
       const edge = edges[i];
@@ -724,9 +752,11 @@ export class TerrainChunk {
         }
       }
 
-      // Intersection setback clearance: sidewalks cleanly stop before intersections
-      const stopA = nA.isJunction ? Math.max(8.0, halfW + 2.5) : 0.0;
-      const stopB = nB.isJunction ? Math.max(8.0, halfW + 2.5) : 0.0;
+      // Intersection setback clearance: sidewalks cleanly stop before intersection throats
+      const isJunctionA = nA.isJunction && nodeDegree[nA.id] >= 3;
+      const isJunctionB = nB.isJunction && nodeDegree[nB.id] >= 3;
+      const stopA = isJunctionA ? Math.min(totalEdgeLen * 0.35, Math.max(13.0, halfW + 4.5)) : 0.0;
+      const stopB = isJunctionB ? Math.min(totalEdgeLen * 0.35, Math.max(13.0, halfW + 4.5)) : 0.0;
 
       // Identify active segments in this chunk and sidewalk eligibility
       const isSegActive = new Uint8Array(numPts - 1);
@@ -772,6 +802,11 @@ export class TerrainChunk {
 
       const grPos: number[] = [];
       const grIdx: number[] = [];
+
+      const kerbRedPos: number[] = [];
+      const kerbRedIdx: number[] = [];
+      const kerbWhitePos: number[] = [];
+      const kerbWhiteIdx: number[] = [];
 
       // 1. Road ribbons and stripes runs
       let pIdx = 0;
@@ -845,6 +880,34 @@ export class TerrainChunk {
             const gv2 = grBaseIdx + (step + 1) * 2;
             const gv3 = grBaseIdx + (step + 1) * 2 + 1;
             grIdx.push(gv0, gv1, gv2, gv2, gv1, gv3);
+
+            // Mountain Touge Apex Kerbs (alternating red and white every 3m)
+            const stepK = runStart + step;
+            const isRed = Math.floor(cumDist[stepK] / 3.0) % 2 === 0;
+            const kPos = isRed ? kerbRedPos : kerbWhitePos;
+            const kIdx = isRed ? kerbRedIdx : kerbWhiteIdx;
+            const b = kPos.length / 3;
+
+            const k0X = pts[stepK].x;
+            const k0Z = pts[stepK].z;
+            const k0Y = elev[stepK] + 0.04;
+            const k0Nx = normX[stepK];
+            const k0Nz = normZ[stepK];
+
+            const k1X = pts[stepK + 1].x;
+            const k1Z = pts[stepK + 1].z;
+            const k1Y = elev[stepK + 1] + 0.04;
+            const k1Nx = normX[stepK + 1];
+            const k1Nz = normZ[stepK + 1];
+
+            const l0X = k0X - halfW * k0Nx;
+            const l0Z = k0Z - halfW * k0Nz;
+            const l1X = k1X - halfW * k1Nx;
+            const l1Z = k1Z - halfW * k1Nz;
+
+            kPos.push(l0X - 0.65 * k0Nx, k0Y, l0Z - 0.65 * k0Nz, l0X, k0Y, l0Z);
+            kPos.push(l1X - 0.65 * k1Nx, k1Y, l1Z - 0.65 * k1Nz, l1X, k1Y, l1Z);
+            kIdx.push(b, b + 1, b + 2, b + 2, b + 1, b + 3);
           }
         }
       }
@@ -928,6 +991,18 @@ export class TerrainChunk {
           const grMesh = new THREE.Mesh(grGeo, guardrailMat);
           this.roadGroup.add(grMesh);
         }
+
+        // Mountain Touge Apex Kerbs (alternating red and white)
+        if (kerbRedIdx.length >= 6) {
+          const redGeo = this.createIndexedGeometry(kerbRedPos, undefined, kerbRedIdx);
+          const redMesh = new THREE.Mesh(redGeo, mountainKerbRedMat);
+          this.roadGroup.add(redMesh);
+        }
+        if (kerbWhiteIdx.length >= 6) {
+          const whiteGeo = this.createIndexedGeometry(kerbWhitePos, undefined, kerbWhiteIdx);
+          const whiteMesh = new THREE.Mesh(whiteGeo, mountainKerbWhiteMat);
+          this.roadGroup.add(whiteMesh);
+        }
       }
     }
 
@@ -935,11 +1010,11 @@ export class TerrainChunk {
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
       if (node.x >= minChunkX && node.x <= maxChunkX && node.z >= minChunkZ && node.z <= maxChunkZ) {
-        if (node.isJunction) {
-          // Only place flat intersection deck patches on relatively flat terrain (slope < 0.06)
-          // Never place on mountain roads or slopes where the circle would float into thin air!
+        // Only place flat intersection deck patches at genuine junctions (degree >= 3)
+        // on flat ground (slope < 0.04). Never place on 2-way road joints or mountain slopes!
+        if (node.isJunction && nodeDegree[node.id] >= 3) {
           const slope = landforms ? landforms.getSlope(node.x, node.z) : 0;
-          if (slope < 0.06) {
+          if (slope < 0.04) {
             const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
             const patchGeo = new THREE.CircleGeometry(8.0, 16);
             patchGeo.rotateX(-Math.PI * 0.5);
@@ -949,18 +1024,21 @@ export class TerrainChunk {
             this.roadGroup.add(patchMesh);
           }
         } else if (node.isRoundabout) {
-          const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
-          const outerGeo = new THREE.RingGeometry(6.0, 16.0, 24);
-          outerGeo.rotateX(-Math.PI * 0.5);
-          const outerMesh = new THREE.Mesh(outerGeo, asphaltAvenueMat);
-          outerMesh.position.set(node.x, patchY, node.z);
-          this.roadGroup.add(outerMesh);
+          const slope = landforms ? landforms.getSlope(node.x, node.z) : 0;
+          if (slope < 0.04) {
+            const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
+            const outerGeo = new THREE.RingGeometry(6.0, 16.0, 24);
+            outerGeo.rotateX(-Math.PI * 0.5);
+            const outerMesh = new THREE.Mesh(outerGeo, asphaltAvenueMat);
+            outerMesh.position.set(node.x, patchY, node.z);
+            this.roadGroup.add(outerMesh);
 
-          const innerGeo = new THREE.CircleGeometry(6.0, 24);
-          innerGeo.rotateX(-Math.PI * 0.5);
-          const innerMesh = new THREE.Mesh(innerGeo, roundaboutCenterMat);
-          innerMesh.position.set(node.x, patchY + 0.12, node.z);
-          this.roadGroup.add(innerMesh);
+            const innerGeo = new THREE.CircleGeometry(6.0, 24);
+            innerGeo.rotateX(-Math.PI * 0.5);
+            const innerMesh = new THREE.Mesh(innerGeo, roundaboutCenterMat);
+            innerMesh.position.set(node.x, patchY + 0.12, node.z);
+            this.roadGroup.add(innerMesh);
+          }
         }
       }
     }
@@ -1021,6 +1099,12 @@ export class TerrainChunk {
     // Remove landmark visual mesh
     if (this.landmarkGroup) {
       this.group.remove(this.landmarkGroup);
+      this.landmarkGroup.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const m = child as THREE.Mesh;
+          if (m.geometry) m.geometry.dispose();
+        }
+      });
       this.landmarkGroup = null;
     }
 

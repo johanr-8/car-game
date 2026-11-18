@@ -273,4 +273,89 @@ describe('Free Roam Fixes & Spectator Fly Mode', () => {
       roamWorld.dispose();
     });
   });
+
+  describe('Architectural Overhaul & Anomaly Elimination', () => {
+    it('generates dense, multi-building urban blocks in downtown with zero empty waste lots', () => {
+      const roamWorld = new RoamWorld();
+      const generator = roamWorld.propsGenerator;
+
+      // In downtown core (chunks around 0, 0), verify high building density
+      let downtownBuildings = 0;
+      for (let cx = -1; cx <= 1; cx++) {
+        for (let cz = -1; cz <= 1; cz++) {
+          const props = generator.generateChunkProps(cx, cz);
+          downtownBuildings += props.buildings.length;
+        }
+      }
+
+      // 9 downtown chunks should comfortably host > 20 buildings across the multi-building lots
+      expect(downtownBuildings).toBeGreaterThan(20);
+      roamWorld.dispose();
+    });
+
+    it('strictly guarantees ZERO residential or commercial buildings above 42m elevation in Pass Gateway & Summit', () => {
+      const roamWorld = new RoamWorld();
+      const generator = roamWorld.propsGenerator;
+
+      // Mountain chunks (Pass Gateway around chunk (3, 4) and Summit Lookout around (5, 5))
+      for (let cx = 3; cx <= 6; cx++) {
+        for (let cz = 3; cz <= 6; cz++) {
+          const props = generator.generateChunkProps(cx, cz);
+          for (const b of props.buildings) {
+            const h = roamWorld.terrainHeight.groundHeightAt(b.box.x, b.box.z);
+            expect(h).toBeLessThanOrEqual(42.0);
+          }
+        }
+      }
+      roamWorld.dispose();
+    });
+
+    it('guarantees building foundations are seated flush with corner elevation difference <= 1.8m', () => {
+      const roamWorld = new RoamWorld();
+      const generator = roamWorld.propsGenerator;
+
+      for (let cx = -2; cx <= 2; cx++) {
+        for (let cz = -2; cz <= 2; cz++) {
+          const props = generator.generateChunkProps(cx, cz);
+          for (const b of props.buildings) {
+            const hw = b.box.width * 0.5;
+            const hd = b.box.depth * 0.5;
+            const h0 = roamWorld.terrainHeight.groundHeightAt(b.box.x - hw, b.box.z - hd);
+            const h1 = roamWorld.terrainHeight.groundHeightAt(b.box.x + hw, b.box.z - hd);
+            const h2 = roamWorld.terrainHeight.groundHeightAt(b.box.x - hw, b.box.z + hd);
+            const h3 = roamWorld.terrainHeight.groundHeightAt(b.box.x + hw, b.box.z + hd);
+            const diff = Math.max(h0, h1, h2, h3) - Math.min(h0, h1, h2, h3);
+            expect(diff).toBeLessThanOrEqual(1.8);
+          }
+        }
+      }
+      roamWorld.dispose();
+    });
+
+    it('generates all 8 hero landmarks with solid colliders including drift garage, storm canal, skidpad, observatory, and bay bridge', () => {
+      const roamWorld = new RoamWorld();
+      const lm = roamWorld.landmarks;
+
+      expect(lm.length).toBe(8);
+
+      const driftGarage = lm.find(l => l.id === 'landmark_drift_garage');
+      expect(driftGarage).toBeDefined();
+      const canal = lm.find(l => l.id === 'landmark_storm_canal');
+      expect(canal).toBeDefined();
+      const skidpad = lm.find(l => l.id === 'landmark_forge_skidpad');
+      expect(skidpad).toBeDefined();
+      const obs = lm.find(l => l.id === 'landmark_eagle_observatory');
+      expect(obs).toBeDefined();
+      const bridge = lm.find(l => l.id === 'landmark_bay_bridge');
+      expect(bridge).toBeDefined();
+
+      for (const landmark of lm) {
+        const mesh = landmark.createMesh(roamWorld.terrainHeight);
+        expect(mesh.children.length).toBeGreaterThan(0);
+        const solidBoxes = landmark.getSolidBoxes(roamWorld.terrainHeight);
+        expect(solidBoxes.length).toBeGreaterThan(0);
+      }
+      roamWorld.dispose();
+    });
+  });
 });

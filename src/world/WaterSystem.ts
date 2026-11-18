@@ -55,14 +55,15 @@ export class WaterSystem {
           vUv = uv;
           vec3 pos = position;
 
-          // Rolling sinusoidal surface wave swell
-          float w1 = sin(pos.x * 0.035 + uTime * 1.5) * cos(pos.y * 0.035 + uTime * 1.2) * 0.22;
-          float w2 = sin((pos.x + pos.y) * 0.07 + uTime * 2.2) * 0.08;
-          pos.z += w1 + w2;
+          // Rolling multi-directional surface swell
+          float w1 = sin(pos.x * 0.025 + uTime * 1.2) * 0.20;
+          float w2 = cos(pos.y * 0.030 + uTime * 1.5) * 0.15;
+          float w3 = sin((pos.x + pos.y) * 0.045 + uTime * 2.0) * 0.08;
+          pos.z += w1 + w2 + w3;
 
           vec4 worldPos = modelMatrix * vec4(pos, 1.0);
           vWorldPos = worldPos.xyz;
-          vNormal = normalize(vec3(-w1 * 0.2, 1.0, -w2 * 0.2));
+          vNormal = normalize(vec3(-w1 * 0.15, 1.0, -w2 * 0.15));
           gl_Position = projectionMatrix * viewMatrix * worldPos;
         }
       `,
@@ -77,17 +78,22 @@ export class WaterSystem {
         varying vec3 vNormal;
 
         void main() {
-          // Dynamic wave crest foam
-          float wavePattern = sin(vWorldPos.x * 0.12 + uTime * 1.8) * cos(vWorldPos.z * 0.12 + uTime * 1.5);
-          float foam = smoothstep(0.52, 0.85, wavePattern);
+          // Multi-directional flowing wave crest foam (NO repeating polka dots!)
+          float w1 = sin(vWorldPos.x * 0.055 + vWorldPos.z * 0.035 + uTime * 1.6);
+          float w2 = sin(vWorldPos.x * -0.040 + vWorldPos.z * 0.065 + uTime * 2.1);
+          float w3 = sin((vWorldPos.x * 0.8 - vWorldPos.z * 0.6) * 0.090 + uTime * 2.7);
+          float foamNoise = (w1 + w2 + w3 * 0.6) / 2.6; // normalized range
+          float foam = smoothstep(0.62, 0.92, foamNoise);
 
-          // Sun specular glint
+          // Fresnel & sun specular glint
           vec3 viewDir = normalize(cameraPosition - vWorldPos);
           vec3 halfDir = normalize(uSunDir + viewDir);
-          float spec = pow(max(dot(normalize(vNormal), halfDir), 0.0), 36.0) * 0.65;
+          float spec = pow(max(dot(normalize(vNormal), halfDir), 0.0), 48.0) * 0.75;
+          float fresnel = pow(1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), 3.0);
 
-          vec3 baseWater = mix(uShallowColor, uDeepColor, 0.60);
-          vec3 finalColor = mix(baseWater, uFoamColor, foam * 0.45) + vec3(spec);
+          vec3 baseWater = mix(uShallowColor, uDeepColor, 0.65);
+          vec3 waterWithFresnel = mix(baseWater, uShallowColor * 1.2, fresnel * 0.4);
+          vec3 finalColor = mix(waterWithFresnel, uFoamColor, foam * 0.5) + vec3(spec);
 
           gl_FragColor = vec4(finalColor, 0.88);
         }
