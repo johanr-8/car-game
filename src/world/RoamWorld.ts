@@ -14,7 +14,7 @@
  */
 import * as THREE from 'three';
 import type { SurfaceHit, SurfaceProvider } from './SurfaceProvider';
-import { SurfaceType, DEFAULT_WORLD_SPEC, type WorldSpec } from './WorldConfig';
+import { SurfaceType, DEFAULT_WORLD_SPEC, type WorldSpec, getChunkKey } from './WorldConfig';
 import { generateRoadNetwork, SpatialRoadIndex, type RoadGraph } from './RoadNetwork';
 import { TerrainHeight } from './TerrainHeight';
 import { ChunkManager } from './ChunkManager';
@@ -49,8 +49,8 @@ export class RoamWorld implements SurfaceProvider {
 
   readonly visualGroup = new THREE.Group();
 
-  // Local Chunk BVH Colliders Map
-  private readonly chunkColliders = new Map<string, ChunkCollider>();
+  // Local Chunk BVH Colliders Map (Numeric keys: getChunkKey(cx, cz) -> ChunkCollider)
+  private readonly chunkColliders = new Map<number, ChunkCollider>();
   private readonly bvhRaycaster = new THREE.Raycaster();
   private readonly bvhHits: THREE.Intersection[] = [];
 
@@ -137,11 +137,19 @@ export class RoamWorld implements SurfaceProvider {
   }
 
   registerChunkCollider(collider: ChunkCollider): void {
-    this.chunkColliders.set(`${collider.cx}_${collider.cz}`, collider);
+    this.chunkColliders.set(getChunkKey(collider.cx, collider.cz), collider);
   }
 
   unregisterChunkCollider(cx: number, cz: number): void {
-    this.chunkColliders.delete(`${cx}_${cz}`);
+    this.chunkColliders.delete(getChunkKey(cx, cz));
+  }
+
+  /**
+   * Resets per-tick caches and telemetry counters at the start of each physics tick.
+   */
+  startPhysicsTick(): void {
+    this.terrainHeight.resetTickCache();
+    this.roadIndex.resetTickCounters();
   }
 
   applyAtmosphere(renderer: THREE.WebGLRenderer): void {
@@ -208,7 +216,7 @@ export class RoamWorld implements SurfaceProvider {
 
     for (let cx = minCx; cx <= maxCx; cx++) {
       for (let cz = minCz; cz <= maxCz; cz++) {
-        const collider = this.chunkColliders.get(`${cx}_${cz}`);
+        const collider = this.chunkColliders.get(getChunkKey(cx, cz));
         if (collider && collider.mesh) {
           this.bvhHits.length = 0;
           collider.mesh.raycast(this.bvhRaycaster, this.bvhHits);

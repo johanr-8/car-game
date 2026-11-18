@@ -17,7 +17,7 @@
  * RULES.md: Seeded determinism. Zero per-frame allocations.
  * ─────────────────────────────────────────────────────────────
  */
-import type { WorldSpec } from './WorldConfig';
+import { type WorldSpec, getChunkKey } from './WorldConfig';
 
 export enum RoadClass {
   HIGHWAY = 'HIGHWAY',
@@ -355,8 +355,19 @@ function planarizeSegments(rawSegments: RawSegment[]): RoadGraph {
  */
 export class SpatialRoadIndex {
   private readonly cellSize: number;
-  private readonly grid = new Map<string, RoadEdge[]>();
+  private readonly grid = new Map<number, RoadEdge[]>();
   readonly graph: RoadGraph;
+
+  // Preallocated stamp array indexed by edge id (zero per-tick allocations)
+  private readonly edgeStamps: Int32Array;
+  private queryGeneration = 0;
+
+  // Preallocated empty edge array to avoid per-call `[]` allocation
+  private static readonly EMPTY_EDGES: readonly RoadEdge[] = [];
+
+  // Performance telemetry
+  callsThisTick = 0;
+  lastTickCalls = 0;
 
   // Reusable scratch for nearest road query (zero per-tick allocations)
   private readonly scratchResult: NearestRoadResult = {
@@ -372,11 +383,16 @@ export class SpatialRoadIndex {
   constructor(graph: RoadGraph, cellSize: number = 128) {
     this.graph = graph;
     this.cellSize = cellSize;
+
+    const maxEdgeId = this.graph.edges.reduce((max, e) => Math.max(max, e.id), 0);
+    this.edgeStamps = new Int32Array(maxEdgeId + 1);
+
     this.buildIndex();
   }
 
-  private cellKey(cx: number, cz: number): string {
-    return `${cx}_${cz}`;
+  resetTickCounters(): void {
+    this.lastTickCalls = this.callsThisTick;
+    this.callsThisTick = 0;
   }
 
   private buildIndex(): void {
@@ -398,7 +414,7 @@ export class SpatialRoadIndex {
 
       for (let cx = minCx; cx <= maxCx; cx++) {
         for (let cz = minCz; cz <= maxCz; cz++) {
-          const key = this.cellKey(cx, cz);
+          const key = getChunkKey(cx, cz);
           let list = this.grid.get(key);
           if (!list) {
             list = [];
@@ -414,14 +430,25 @@ export class SpatialRoadIndex {
    * Returns all road edges overlapping a specific chunk coordinate.
    */
   getEdgesInChunk(cx: number, cz: number): RoadEdge[] {
-    return this.grid.get(this.cellKey(cx, cz)) || [];
+    return this.grid.get(getChunkKey(cx, cz)) || (SpatialRoadIndex.EMPTY_EDGES as RoadEdge[]);
   }
 
   /**
    * Queries the nearest road edge to (x, z) within maxRadius.
-   * Zero heap allocations: populates and returns pre-allocated scratch result.
+   * Zero heap allocations: uses numeric cell keys, preallocated edgeStamps with generation counter,
+   * and populates/returns pre-allocated scratch result.
    */
   getNearestRoad(x: number, z: number, maxRadius: number = 64): NearestRoadResult | null {
+    this.callsThisTick++;
+
+    // Increment query generation stamp (wrap safely at 31-bit max signed int)
+    this.queryGeneration++;
+    if (this.queryGeneration >= 0x7fffffff) {
+      this.queryGeneration = 1;
+      this.edgeStamps.fill(0);
+    }
+    const gen = this.queryGeneration;
+
     const minCx = Math.floor((x - maxRadius) / this.cellSize);
     const maxCx = Math.floor((x + maxRadius) / this.cellSize);
     const minCz = Math.floor((z - maxRadius) / this.cellSize);
@@ -434,18 +461,17 @@ export class SpatialRoadIndex {
     let bestT = 0;
     let bestSignedLat = 0;
 
-    const checkedEdges = new Set<number>();
     const nodes = this.graph.nodes;
 
     for (let cx = minCx; cx <= maxCx; cx++) {
       for (let cz = minCz; cz <= maxCz; cz++) {
-        const edges = this.grid.get(this.cellKey(cx, cz));
+        const edges = this.grid.get(getChunkKey(cx, cz));
         if (!edges) continue;
 
         for (let i = 0; i < edges.length; i++) {
           const edge = edges[i];
-          if (checkedEdges.has(edge.id)) continue;
-          checkedEdges.add(edge.id);
+          if (this.edgeStamps[edge.id] === gen) continue;
+          this.edgeStamps[edge.id] = gen;
 
           const nA = nodes[edge.fromNodeId];
           const nB = nodes[edge.toNodeId];

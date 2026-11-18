@@ -88,6 +88,14 @@ export class TerrainHeight {
 
   private readonly blendMargin = 16.0; // 16m embankment blend width
 
+  // ── Tiny Per-Tick Query Cache (Zero Heap Allocations) ──────
+  private static readonly CACHE_SIZE = 16;
+  private readonly cacheX = new Float64Array(TerrainHeight.CACHE_SIZE);
+  private readonly cacheZ = new Float64Array(TerrainHeight.CACHE_SIZE);
+  private readonly cacheH = new Float64Array(TerrainHeight.CACHE_SIZE);
+  private readonly cacheValid = new Uint8Array(TerrainHeight.CACHE_SIZE);
+  private cacheHead = 0;
+
   constructor(spec: WorldSpec, roadIndex: SpatialRoadIndex) {
     this.spec = spec;
     this.roadIndex = roadIndex;
@@ -96,6 +104,14 @@ export class TerrainHeight {
 
     // Compute smooth road node elevations
     this.computeNodeElevations();
+  }
+
+  /**
+   * Clears the per-tick query cache. Called at the start of each physics tick.
+   */
+  resetTickCache(): void {
+    this.cacheValid.fill(0);
+    this.cacheHead = 0;
   }
 
   private computeNodeElevations(): void {
@@ -126,43 +142,60 @@ export class TerrainHeight {
 
   /**
    * Evaluates terrain elevation at (x, z) with road flattening and embankment blending.
-   * Zero heap allocations. Microsecond execution.
+   * Zero heap allocations. Microsecond execution. Reuses per-tick cached result for nearby queries.
    */
   groundHeightAt(x: number, z: number): number {
+    // 0. Check per-tick cache: reuse if query is within ~5mm (0.005m)
+    for (let i = 0; i < TerrainHeight.CACHE_SIZE; i++) {
+      if (this.cacheValid[i] === 1) {
+        const dx = this.cacheX[i] - x;
+        const dz = this.cacheZ[i] - z;
+        if (dx * dx + dz * dz < 0.000025) {
+          return this.cacheH[i];
+        }
+      }
+    }
+
     const rawH = this.rawTerrainHeight(x, z);
 
+    let h = rawH;
     // Query nearest road within road width + blend margin
     const nearest = this.roadIndex.getNearestRoad(x, z, 40.0);
-    if (!nearest) return rawH;
+    if (nearest) {
+      const d = nearest.distance;
+      const w = nearest.roadHalfWidth;
 
-    const d = nearest.distance;
-    const w = nearest.roadHalfWidth;
+      // Centerline road elevation following smooth terrain profile
+      const roadH = this.rawTerrainHeight(nearest.projectedX, nearest.projectedZ);
 
-    // Centerline road elevation following smooth terrain profile
-    const roadH = this.rawTerrainHeight(nearest.projectedX, nearest.projectedZ);
-
-    // 1. Directly on road deck: +0.08m asphalt pavement thickness
-    if (d <= w) {
-      return roadH + 0.08;
+      // 1. Directly on road deck: +0.08m asphalt pavement thickness
+      if (d <= w) {
+        h = roadH + 0.08;
+      } else {
+        // 2. Flat road shoulder / curb step (within 4m beyond asphalt edge)
+        const shoulderMargin = 4.0;
+        if (d <= w + shoulderMargin) {
+          // Smooth curb drop from asphalt surface down to grass/dirt shoulder
+          const curbT = Math.min(1.0, (d - w) / 0.8);
+          h = roadH + 0.08 * (1 - curbT);
+        } else if (d < w + shoulderMargin + this.blendMargin) {
+          // 3. Embankment transition into natural rolling hills
+          const u = (d - (w + shoulderMargin)) / this.blendMargin;
+          const k = u * u * (3 - 2 * u); // Cubic smoothstep
+          h = (1 - k) * roadH + k * rawH;
+        }
+      }
     }
 
-    // 2. Flat road shoulder / curb step (within 4m beyond asphalt edge)
-    const shoulderMargin = 4.0;
-    if (d <= w + shoulderMargin) {
-      // Smooth curb drop from asphalt surface down to grass/dirt shoulder
-      const curbT = Math.min(1.0, (d - w) / 0.8);
-      return roadH + 0.08 * (1 - curbT);
-    }
+    // Record into per-tick circular cache
+    const head = this.cacheHead;
+    this.cacheX[head] = x;
+    this.cacheZ[head] = z;
+    this.cacheH[head] = h;
+    this.cacheValid[head] = 1;
+    this.cacheHead = (head + 1) & 15;
 
-    // 3. Embankment transition into natural rolling hills
-    if (d < w + shoulderMargin + this.blendMargin) {
-      const u = (d - (w + shoulderMargin)) / this.blendMargin;
-      const k = u * u * (3 - 2 * u); // Cubic smoothstep
-      return (1 - k) * roadH + k * rawH;
-    }
-
-    // 4. Natural undulating hills
-    return rawH;
+    return h;
   }
 
   /**

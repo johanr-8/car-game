@@ -38,6 +38,20 @@ export const DEFAULT_WORLD_SPEC: WorldSpec = {
   maxElevation: 10.0,
 };
 
+/**
+ * Coordinate offset ensuring non-negative indices for chunk coordinates [-32768, 32767].
+ */
+export const CHUNK_KEY_OFFSET = 32768;
+
+/**
+ * Bijective 32-bit numeric key for 2D chunk/grid coordinates [-32768, 32767].
+ * Zero heap allocations (no template strings or objects).
+ * Key range [0, 4,294,967,295] fits comfortably within JavaScript's 53-bit safe integer limit.
+ */
+export function getChunkKey(cx: number, cz: number): number {
+  return (cx + CHUNK_KEY_OFFSET) * 65536 + (cz + CHUNK_KEY_OFFSET);
+}
+
 export enum SurfaceType {
   ASPHALT = 'ASPHALT',
   GRASS = 'GRASS',

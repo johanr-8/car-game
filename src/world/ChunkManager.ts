@@ -15,7 +15,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
-import type { WorldSpec } from './WorldConfig';
+import { type WorldSpec, CHUNK_KEY_OFFSET, getChunkKey } from './WorldConfig';
 import type { TerrainHeight } from './TerrainHeight';
 import type { SpatialRoadIndex } from './RoadNetwork';
 import { RoadClass } from './RoadNetwork';
@@ -146,6 +146,22 @@ interface ClipResult {
 }
 const _clipResult: ClipResult = { t0: 0, t1: 1 };
 
+function clipAxis(p: number, q: number, ref: ClipResult): boolean {
+  if (Math.abs(p) < 1e-9) {
+    if (q < 0) return false;
+  } else {
+    const r = q / p;
+    if (p < 0) {
+      if (r > ref.t1) return false;
+      if (r > ref.t0) ref.t0 = r;
+    } else {
+      if (r < ref.t0) return false;
+      if (r < ref.t1) ref.t1 = r;
+    }
+  }
+  return true;
+}
+
 function clipSegmentAABB(
   x0: number, z0: number,
   x1: number, z1: number,
@@ -153,33 +169,17 @@ function clipSegmentAABB(
   minZ: number, maxZ: number,
   outT: ClipResult
 ): boolean {
-  let t0 = 0.0;
-  let t1 = 1.0;
+  outT.t0 = 0.0;
+  outT.t1 = 1.0;
   const dx = x1 - x0;
   const dz = z1 - z0;
 
-  const p = [-dx, dx, -dz, dz];
-  const q = [x0 - minX, maxX - x0, z0 - minZ, maxZ - z0];
+  if (!clipAxis(-dx, x0 - minX, outT)) return false;
+  if (!clipAxis(dx, maxX - x0, outT)) return false;
+  if (!clipAxis(-dz, z0 - minZ, outT)) return false;
+  if (!clipAxis(dz, maxZ - z0, outT)) return false;
 
-  for (let i = 0; i < 4; i++) {
-    const pi = p[i];
-    const qi = q[i];
-    if (Math.abs(pi) < 1e-9) {
-      if (qi < 0) return false;
-    } else {
-      const r = qi / pi;
-      if (pi < 0) {
-        if (r > t1) return false;
-        if (r > t0) t0 = r;
-      } else {
-        if (r < t0) return false;
-        if (r < t1) t1 = r;
-      }
-    }
-  }
-  outT.t0 = t0;
-  outT.t1 = t1;
-  return t0 <= t1;
+  return outT.t0 <= outT.t1;
 }
 
 /**
@@ -681,10 +681,13 @@ export class ChunkManager {
   private readonly poolManager?: CityPoolManager;
   private readonly roamWorld?: RoamWorld;
 
-  private readonly loadedChunks = new Map<string, TerrainChunk>();
+  // Numeric chunk keys: getChunkKey(cx, cz) -> TerrainChunk (zero template-string allocs)
+  private readonly loadedChunks = new Map<number, TerrainChunk>();
   private readonly chunkPool: TerrainChunk[] = [];
-  private readonly buildQueue: { cx: number; cz: number }[] = [];
-  private readonly queuedSet = new Set<string>();
+  // Numeric queue of chunk keys: zero { cx, cz } object allocations
+  private readonly buildQueue: number[] = [];
+  private readonly queuedSet = new Set<number>();
+  private readonly chunksToUnload: TerrainChunk[] = [];
 
   lastBuildMs = 0;
   lastPlayerCx = 999999;
@@ -712,10 +715,6 @@ export class ChunkManager {
     }
   }
 
-  private chunkKey(cx: number, cz: number): string {
-    return `${cx}_${cz}`;
-  }
-
   get loadedCount(): number {
     return this.loadedChunks.size;
   }
@@ -724,6 +723,7 @@ export class ChunkManager {
    * Per-frame chunk streaming update.
    * Loads within loadRadius, unloads beyond unloadRadius with hysteresis,
    * and builds at most one chunk per frame within a ~2ms budget.
+   * Zero per-frame heap allocations.
    */
   update(playerX: number, playerZ: number): void {
     const chunkSize = this.spec.chunkSize;
@@ -740,53 +740,62 @@ export class ChunkManager {
       this.lastPlayerCx = playerCx;
       this.lastPlayerCz = playerCz;
 
-      // A. Queue chunks within loadRadius that are not yet loaded
+      // A. Queue chunks within loadRadius that are not yet loaded (stores numeric key)
       for (let dx = -loadRad; dx <= loadRad; dx++) {
         for (let dz = -loadRad; dz <= loadRad; dz++) {
           if (dx * dx + dz * dz <= loadRadSq) {
             const cx = playerCx + dx;
             const cz = playerCz + dz;
-            const key = this.chunkKey(cx, cz);
+            const key = getChunkKey(cx, cz);
 
             if (!this.loadedChunks.has(key) && !this.queuedSet.has(key)) {
-              this.buildQueue.push({ cx, cz });
+              this.buildQueue.push(key);
               this.queuedSet.add(key);
             }
           }
         }
       }
 
-      // Sort build queue so chunks closest to player build first
-      this.buildQueue.sort((a, b) => {
-        const distA = (a.cx - playerCx) ** 2 + (a.cz - playerCz) ** 2;
-        const distB = (b.cx - playerCx) ** 2 + (b.cz - playerCz) ** 2;
-        return distA - distB;
+      // Sort build queue so chunks closest to player build first (unpacks numeric key)
+      this.buildQueue.sort((keyA, keyB) => {
+        const ax = Math.floor(keyA / 65536) - CHUNK_KEY_OFFSET - playerCx;
+        const az = (keyA % 65536) - CHUNK_KEY_OFFSET - playerCz;
+        const bx = Math.floor(keyB / 65536) - CHUNK_KEY_OFFSET - playerCx;
+        const bz = (keyB % 65536) - CHUNK_KEY_OFFSET - playerCz;
+        return (ax * ax + az * az) - (bx * bx + bz * bz);
       });
 
-      // B. Unload chunks beyond unloadRadius with hysteresis
-      for (const [key, chunk] of this.loadedChunks.entries()) {
+      // B. Unload chunks beyond unloadRadius with hysteresis (zero array allocations)
+      this.chunksToUnload.length = 0;
+      for (const chunk of this.loadedChunks.values()) {
         const dx = chunk.cx - playerCx;
         const dz = chunk.cz - playerCz;
         if (dx * dx + dz * dz > unloadRadSq) {
-          this.unloadChunk(key, chunk);
+          this.chunksToUnload.push(chunk);
         }
       }
+      for (let i = 0; i < this.chunksToUnload.length; i++) {
+        const chunk = this.chunksToUnload[i];
+        this.unloadChunk(getChunkKey(chunk.cx, chunk.cz), chunk);
+      }
+      this.chunksToUnload.length = 0;
     }
 
     // ── 2. Build at Most One Chunk per Frame (~2 ms Budget) ──
     if (this.buildQueue.length > 0) {
-      const item = this.buildQueue.shift()!;
-      const key = this.chunkKey(item.cx, item.cz);
+      const key = this.buildQueue.shift()!;
       this.queuedSet.delete(key);
 
       if (!this.loadedChunks.has(key)) {
+        const cx = Math.floor(key / 65536) - CHUNK_KEY_OFFSET;
+        const cz = (key % 65536) - CHUNK_KEY_OFFSET;
         const t0 = performance.now();
 
         // Get chunk from pool or instantiate if pool empty
         const chunk = this.chunkPool.length > 0 ? this.chunkPool.pop()! : new TerrainChunk();
         chunk.build(
-          item.cx,
-          item.cz,
+          cx,
+          cz,
           this.terrainHeight,
           this.roadIndex,
           this.spec,
@@ -809,7 +818,7 @@ export class ChunkManager {
     }
   }
 
-  private unloadChunk(key: string, chunk: TerrainChunk): void {
+  private unloadChunk(key: number, chunk: TerrainChunk): void {
     this.loadedChunks.delete(key);
     this.rootGroup.remove(chunk.group);
     chunk.recycle(this.poolManager, this.roamWorld);
@@ -831,7 +840,7 @@ export class ChunkManager {
         if (dx * dx + dz * dz <= loadRadSq) {
           const cx = playerCx + dx;
           const cz = playerCz + dz;
-          const key = this.chunkKey(cx, cz);
+          const key = getChunkKey(cx, cz);
 
           if (!this.loadedChunks.has(key)) {
             const chunk = this.chunkPool.length > 0 ? this.chunkPool.pop()! : new TerrainChunk();
@@ -863,7 +872,7 @@ export class ChunkManager {
   }
 
   dispose(): void {
-    for (const [key, chunk] of this.loadedChunks.entries()) {
+    for (const [key, chunk] of this.loadedChunks) {
       this.unloadChunk(key, chunk);
     }
     for (let i = 0; i < this.chunkPool.length; i++) {

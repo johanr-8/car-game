@@ -433,10 +433,15 @@ export class RaceSystem {
     // ── 1. Free Roam Physics ──
     if (this.gameMode === GameMode.ROAM) {
       if (this.gameState === GameState.ROAMING && this.roamWorld) {
+        this.roamWorld.startPhysicsTick();
         this.vehicleSystem.updatePhysics(dt, input, this.roamWorld);
         const player = this.vehicleSystem.playerVehicle;
         if (player.controller.position.y < -50) {
           this.respawnRoam();
+        }
+        if (this.hudSystem) {
+          this.hudSystem.stats.roadQueriesPerTick = this.roamWorld.roadIndex.callsThisTick;
+          this.hudSystem.stats.unavoidableAllocs = 0;
         }
       }
       return;

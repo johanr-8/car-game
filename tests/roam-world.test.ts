@@ -5,6 +5,7 @@ import {
   type WorldSpec,
   SurfaceType,
   SURFACE_CONFIG,
+  getChunkKey,
 } from '../src/world/WorldConfig';
 import {
   generateRoadNetwork,
@@ -515,8 +516,8 @@ describe('Free Roam: Districts, City Props & Instanced Pools', () => {
     }
     expect(targetBuilding).toBeDefined();
 
-    // Verify chunk collider is registered
-    expect((roam as any).chunkColliders.has(`${targetChunkX}_${targetChunkZ}`)).toBe(true);
+    // Verify chunk collider is registered with numeric key
+    expect((roam as any).chunkColliders.has(getChunkKey(targetChunkX, targetChunkZ))).toBe(true);
 
     // Probe towards the building wall
     const box = targetBuilding.box;
@@ -531,6 +532,114 @@ describe('Free Roam: Districts, City Props & Instanced Pools', () => {
     // Wall normal must be vertical wall facing outward (+X)
     expect(hit.normal.x).toBeGreaterThan(0.7);
     expect(Math.abs(hit.normal.y)).toBeLessThan(0.15); // NOT ground (vertical wall)
+
+    roam.dispose();
+  });
+});
+
+describe('Free Roam: Performance Hygiene & Zero Per-Tick Allocations', () => {
+  it('SpatialRoadIndex: numeric cell keys and generation stamped edge queries with zero per-call allocations', () => {
+    const graph = generateRoadNetwork(DEFAULT_WORLD_SPEC);
+    const roadIndex = new SpatialRoadIndex(graph, DEFAULT_WORLD_SPEC.chunkSize);
+
+    roadIndex.resetTickCounters();
+    expect(roadIndex.callsThisTick).toBe(0);
+
+    // Initial query
+    const res1 = roadIndex.getNearestRoad(graph.nodes[0].x, graph.nodes[0].z, 64);
+    expect(res1).not.toBeNull();
+    expect(res1!.distance).toBeCloseTo(0, 2);
+    expect(roadIndex.callsThisTick).toBe(1);
+
+    // Consecutive queries return same pre-allocated scratchResult reference
+    const res2 = roadIndex.getNearestRoad(graph.nodes[1].x, graph.nodes[1].z, 64);
+    expect(res2).toBe(res1); // exact same object identity (reusable scratch)
+    expect(roadIndex.callsThisTick).toBe(2);
+
+    // Queries outside range return null
+    const resNone = roadIndex.getNearestRoad(1900, 1900, 10);
+    expect(resNone).toBeNull();
+    expect(roadIndex.callsThisTick).toBe(3);
+
+    // Reset tick counters
+    roadIndex.resetTickCounters();
+    expect(roadIndex.lastTickCalls).toBe(3);
+    expect(roadIndex.callsThisTick).toBe(0);
+  });
+
+  it('Numeric chunk key helper: bijective mapping across positive and negative chunk coordinates', () => {
+    const coords = [
+      [0, 0],
+      [-1, -1],
+      [1, 1],
+      [-50, 120],
+      [32767, -32768],
+      [-32768, 32767],
+    ];
+
+    const keys = new Set<number>();
+    for (const [cx, cz] of coords) {
+      const k = getChunkKey(cx, cz);
+      expect(keys.has(k)).toBe(false);
+      keys.add(k);
+
+      // Unpack test
+      const unpackedCx = Math.floor(k / 65536) - 32768;
+      const unpackedCz = (k % 65536) - 32768;
+      expect(unpackedCx).toBe(cx);
+      expect(unpackedCz).toBe(cz);
+    }
+  });
+
+  it('TerrainHeight: reuses result from 16-entry per-tick cache for queries within 5mm', () => {
+    const graph = generateRoadNetwork(DEFAULT_WORLD_SPEC);
+    const roadIndex = new SpatialRoadIndex(graph, DEFAULT_WORLD_SPEC.chunkSize);
+    const terrain = new TerrainHeight(DEFAULT_WORLD_SPEC, roadIndex);
+
+    terrain.resetTickCache();
+    roadIndex.resetTickCounters();
+
+    // Query 1
+    const h1 = terrain.groundHeightAt(120.456, -80.123);
+    const queriesAfterH1 = roadIndex.callsThisTick;
+    expect(queriesAfterH1).toBeGreaterThanOrEqual(1);
+
+    // Query 2: identical point within same tick -> cache hit, zero roadIndex queries
+    const h2 = terrain.groundHeightAt(120.456, -80.123);
+    expect(h2).toBe(h1);
+    expect(roadIndex.callsThisTick).toBe(queriesAfterH1); // No new road query!
+
+    // Query 3: point within 2mm (0.002m) -> cache hit
+    const h3 = terrain.groundHeightAt(120.457, -80.122);
+    expect(h3).toBe(h1);
+    expect(roadIndex.callsThisTick).toBe(queriesAfterH1);
+
+    // Reset tick cache -> next query must re-evaluate
+    terrain.resetTickCache();
+    const h4 = terrain.groundHeightAt(120.456, -80.123);
+    expect(h4).toBe(h1);
+    expect(roadIndex.callsThisTick).toBeGreaterThan(queriesAfterH1);
+  });
+
+  it('RoamWorld: startPhysicsTick resets tick cache and road query counters cleanly', () => {
+    const roam = new RoamWorld();
+    roam.startPhysicsTick();
+
+    expect(roam.roadIndex.callsThisTick).toBe(0);
+
+    // Raycast evaluates ground and increments query counters
+    const origin = new THREE.Vector3(0, 10, 0);
+    const dir = new THREE.Vector3(0, -1, 0);
+    const hit: any = { hit: false, distance: 0, point: new THREE.Vector3(), normal: new THREE.Vector3() };
+
+    roam.raycast(origin, dir, 20, hit);
+    const calls = roam.roadIndex.callsThisTick;
+    expect(calls).toBeGreaterThan(0);
+
+    // Starting new tick resets counter and snapshots lastTickCalls
+    roam.startPhysicsTick();
+    expect(roam.roadIndex.lastTickCalls).toBe(calls);
+    expect(roam.roadIndex.callsThisTick).toBe(0);
 
     roam.dispose();
   });

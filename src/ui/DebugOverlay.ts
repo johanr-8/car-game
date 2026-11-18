@@ -42,6 +42,8 @@ export class DebugOverlay {
   private readonly elChunks: HTMLSpanElement;
   private readonly elBuild:  HTMLSpanElement;
   private readonly elSurf:   HTMLSpanElement;
+  private readonly elRoadQueries: HTMLSpanElement;
+  private readonly elAllocs:      HTMLSpanElement;
 
   // ── Profiling Metrics Buffer (Zero GC per frame) ────────────
   private readonly windowSamples = new Float32Array(2400); // Up to 2400 frames per 10s (~240 Hz headroom)
@@ -110,6 +112,8 @@ export class DebugOverlay {
     this.elSurf   = makeRow('Surface    :');
     this.elChunks = makeRow('Chunks     :');
     this.elBuild  = makeRow('Build ms   :');
+    this.elRoadQueries = makeRow('Road queries/tick:');
+    this.elAllocs      = makeRow('Unavoidable allocs:');
 
     const hint = document.createElement('div');
     hint.textContent = '[F3] toggle | auto-profile: 10s log';
@@ -234,6 +238,8 @@ export class DebugOverlay {
     this.elSurf.textContent   = stats.surfaceLabel;
     this.elChunks.textContent = String(stats.loadedChunks);
     this.elBuild.textContent  = stats.chunkBuildMs > 0 ? `${stats.chunkBuildMs.toFixed(2)} ms` : 'idle';
+    this.elRoadQueries.textContent = String(stats.roadQueriesPerTick);
+    this.elAllocs.textContent = String(stats.unavoidableAllocs);
   }
 
   /**
