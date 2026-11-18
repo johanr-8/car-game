@@ -251,23 +251,33 @@ export class RaceSystem {
    * Starts Free Roam sandbox mode.
    */
   startRoam(): void {
-    this.gameMode = GameMode.ROAM;
-    this.countdownTimer = -999;
-    this.hudSystem.raceHUD.setMode(GameMode.ROAM);
+    try {
+      this.gameMode = GameMode.ROAM;
+      this.countdownTimer = -999;
+      this.hudSystem.raceHUD.setMode(GameMode.ROAM);
 
-    this.hudSystem.mainMenu.hide();
-    this.hudSystem.pauseMenu.hide();
-    this.hudSystem.resultsModal.hide();
-    this.hudSystem.settingsModal.close();
-    this.hudSystem.controlsModal.hide();
+      this.hudSystem.mainMenu.hide();
+      this.hudSystem.pauseMenu.hide();
+      this.hudSystem.resultsModal.hide();
+      this.hudSystem.settingsModal.close();
+      this.hudSystem.controlsModal.hide();
 
-    // Ensure Roam World scene is mounted
-    this.ensureRoamWorld();
+      // Ensure Roam World scene is mounted
+      this.ensureRoamWorld();
 
-    // Reset vehicle and camera at Roam spawn point
-    this.vehicleSystem.resetAll(ROAM_SPAWN_POS, ROAM_SPAWN_QUAT);
+      // Reset vehicle and camera at Roam spawn point
+      this.vehicleSystem.resetAll(ROAM_SPAWN_POS, ROAM_SPAWN_QUAT);
 
-    this.setGameState(GameState.ROAMING);
+      this.setGameState(GameState.ROAMING);
+    } catch (err: any) {
+      console.error('[startRoam failed]', err);
+      const box = document.getElementById('debug-error-banner') || document.createElement('div');
+      box.id = 'debug-error-banner';
+      box.style.cssText = 'position:fixed;top:0;left:0;width:100vw;background:#dc2626;color:#ffffff;padding:16px 20px;font-family:monospace;font-size:13px;z-index:999999;white-space:pre-wrap;overflow:auto;max-height:80vh;box-shadow:0 8px 32px rgba(0,0,0,0.8);border-bottom:3px solid #f87171;';
+      box.textContent = '[FREE ROAM START FAILED] ' + (err?.stack || err?.message || String(err));
+      document.body.appendChild(box);
+      throw err;
+    }
   }
 
   /**

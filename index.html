@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:," />
     <title>Warp City: Gravity Drift</title>
+    <script>
+      window.addEventListener('error', function (e) {
+        var box = document.getElementById('debug-error-banner') || document.createElement('div');
+        box.id = 'debug-error-banner';
+        box.style.cssText = 'position:fixed;top:0;left:0;width:100vw;background:#dc2626;color:#ffffff;padding:16px 20px;font-family:monospace;font-size:13px;z-index:999999;white-space:pre-wrap;overflow:auto;max-height:80vh;box-shadow:0 8px 32px rgba(0,0,0,0.8);border-bottom:3px solid #f87171;';
+        box.textContent = '[RUNTIME ERROR] ' + (e.error ? (e.error.stack || e.error.message) : (e.message || String(e)));
+        document.body.appendChild(box);
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var box = document.getElementById('debug-error-banner') || document.createElement('div');
+        box.id = 'debug-error-banner';
+        box.style.cssText = 'position:fixed;top:0;left:0;width:100vw;background:#dc2626;color:#ffffff;padding:16px 20px;font-family:monospace;font-size:13px;z-index:999999;white-space:pre-wrap;overflow:auto;max-height:80vh;box-shadow:0 8px 32px rgba(0,0,0,0.8);border-bottom:3px solid #f87171;';
+        box.textContent = '[UNHANDLED REJECTION] ' + (e.reason ? (e.reason.stack || e.reason.message || String(e.reason)) : String(e));
+        document.body.appendChild(box);
+      });
+    </script>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body {
