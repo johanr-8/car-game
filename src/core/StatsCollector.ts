@@ -21,6 +21,8 @@ export class StatsCollector {
   surfaceLabel = 'ASPHALT (100% GRIP)';
   roadQueriesPerTick = 0;
   unavoidableAllocs = 0;
+  biomeName = 'MEADOW';
+  slopeDeg = 0;
 
   constructor() {
     this.frameTimes = new Float32Array(this.WINDOW);

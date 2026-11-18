@@ -42,6 +42,7 @@ export class DebugOverlay {
   private readonly elChunks: HTMLSpanElement;
   private readonly elBuild:  HTMLSpanElement;
   private readonly elSurf:   HTMLSpanElement;
+  private readonly elBiomeSlope:  HTMLSpanElement;
   private readonly elRoadQueries: HTMLSpanElement;
   private readonly elAllocs:      HTMLSpanElement;
 
@@ -110,6 +111,7 @@ export class DebugOverlay {
     this.elHeap   = makeRow('JS Heap    :');
     this.elGrav   = makeRow('Surface N  :');
     this.elSurf   = makeRow('Surface    :');
+    this.elBiomeSlope = makeRow('Biome/Slope:');
     this.elChunks = makeRow('Chunks     :');
     this.elBuild  = makeRow('Build ms   :');
     this.elRoadQueries = makeRow('Road queries/tick:');
@@ -236,6 +238,7 @@ export class DebugOverlay {
     this.elHeap.textContent   = mem ? `${(mem.usedJSHeapSize / (1024 * 1024)).toFixed(1)} MB` : 'N/A';
     this.elGrav.textContent   = stats.gravityLabel;
     this.elSurf.textContent   = stats.surfaceLabel;
+    this.elBiomeSlope.textContent = `${stats.biomeName} (${stats.slopeDeg.toFixed(1)}°)`;
     this.elChunks.textContent = String(stats.loadedChunks);
     this.elBuild.textContent  = stats.chunkBuildMs > 0 ? `${stats.chunkBuildMs.toFixed(2)} ms` : 'idle';
     this.elRoadQueries.textContent = String(stats.roadQueriesPerTick);

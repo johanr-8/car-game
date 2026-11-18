@@ -183,7 +183,7 @@ describe('Free Roam: Terrain Elevation & Road Flattening', () => {
       }
     }
     expect(maxH).toBeLessThanOrEqual(DEFAULT_WORLD_SPEC.maxElevation + 1.0);
-    expect(minH).toBeGreaterThanOrEqual(0.0);
+    expect(minH).toBeGreaterThanOrEqual(DEFAULT_WORLD_SPEC.macroLandforms?.oceanFloorDepth ?? -20.0);
     expect(maxH - minH).toBeGreaterThan(4.0); // Sufficient hill variance
 
     // 2. Flattening under road test: sample across a highway cross-section

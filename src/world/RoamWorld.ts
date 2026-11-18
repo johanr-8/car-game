@@ -24,16 +24,17 @@ import { createLandmarkDefs, type LandmarkDef } from './Landmarks';
 import { CityPoolManager } from './InstancedPool';
 import { CityPropsGenerator } from './CityPropsGenerator';
 import type { ChunkCollider } from './ChunkCollider';
+import { WaterSystem } from './WaterSystem';
 
 const _scratchSolidPoint = new THREE.Vector3();
 const _scratchSolidNormal = new THREE.Vector3();
 
-// Highway Spawn Point: Spawns on the 22m-wide diagonal highway heading Northeast
-export const ROAM_SPAWN_POS = new THREE.Vector3(-800, 2.84, -800);
-// -135 degrees around Y turns (0, 0, -1) into (+X, +Z) along diagonal highway
+// Coastal Meadow Spawn Point: Spawns on a flat, lush meadow overlooking the western ocean
+export const ROAM_SPAWN_POS = new THREE.Vector3(-960, 22.0, -320);
+// Heading East/Inland towards the city basin
 export const ROAM_SPAWN_QUAT = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(0, 1, 0),
-  -Math.PI * 0.75
+  -Math.PI * 0.5
 );
 
 export class RoamWorld implements SurfaceProvider {
@@ -45,6 +46,7 @@ export class RoamWorld implements SurfaceProvider {
   readonly landmarks: LandmarkDef[];
   readonly poolManager: CityPoolManager;
   readonly propsGenerator: CityPropsGenerator;
+  readonly waterSystem: WaterSystem;
   readonly chunkManager: ChunkManager;
 
   readonly visualGroup = new THREE.Group();
@@ -113,11 +115,15 @@ export class RoamWorld implements SurfaceProvider {
       this.landmarks
     );
 
+    // 7. Water System (Sea plane + Inland Lake)
+    this.waterSystem = new WaterSystem(this.spec, this.terrainHeight.landforms ?? undefined);
+    this.visualGroup.add(this.waterSystem.rootGroup);
+
     // Update spawn position to exact ground elevation
     const spawnGroundY = this.terrainHeight.groundHeightAt(ROAM_SPAWN_POS.x, ROAM_SPAWN_POS.z);
     ROAM_SPAWN_POS.y = spawnGroundY + 0.34;
 
-    // 7. Procedural Chunk Manager
+    // 8. Procedural Chunk Manager
     this.chunkManager = new ChunkManager(
       this.spec,
       this.terrainHeight,
@@ -171,10 +177,11 @@ export class RoamWorld implements SurfaceProvider {
   }
 
   /**
-   * Per-frame visual update for chunk streaming.
+   * Per-frame visual update for chunk streaming and water animation.
    */
-  updateVisuals(playerX: number, playerZ: number): void {
+  updateVisuals(playerX: number, playerZ: number, dt: number = 0.016): void {
     this.chunkManager.update(playerX, playerZ);
+    this.waterSystem.update(dt);
 
     // Keep sunlight shadow camera centered near player for sharp shadows
     this.sunLight.position.set(playerX + 100, 220, playerZ + 80);
@@ -327,6 +334,7 @@ export class RoamWorld implements SurfaceProvider {
 
   dispose(): void {
     this.chunkManager.dispose();
+    this.waterSystem.dispose();
     this.poolManager.dispose();
     this.chunkColliders.clear();
   }

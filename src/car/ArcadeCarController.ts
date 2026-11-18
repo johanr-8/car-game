@@ -87,6 +87,7 @@ export class ArcadeCarController {
   boostForce = 0;
   hasBarrierContact = false;
   currentSurfaceType: SurfaceType = SurfaceType.ASPHALT;
+  isRoamSurface = false;
 
   // ── Interpolation State (for α-rendering) ───────────────────
   readonly prevPosition = new THREE.Vector3(0, 0.94, 25);
@@ -136,10 +137,14 @@ export class ArcadeCarController {
    * Surface raycasting: downward probe along surfaceNormal to glue car to track on any 6DOF surface.
    */
   private detectSurface(collision: SurfaceProvider): void {
-    // Cast probe from slightly above car down along -surfaceNormal
+    // Cast probe from slightly above car down along -surfaceNormal with mild dynamic downforce over crests in Free Roam
+    const isRoam = collision.getSurfaceTypeAt !== undefined;
+    this.isRoamSurface = isRoam;
+    const crestDownforceDist = isRoam ? (Math.min(1.0, Math.abs(this.speed) / C.maxSpeed) * 1.5) : 0;
+    const probeDist = C.snapDistance + 1.4 + crestDownforceDist;
+
     _probePos.copy(this.position).addScaledVector(this.surfaceNormal, 1.4);
     _probeDir.copy(this.surfaceNormal).negate();
-    const probeDist = C.snapDistance + 1.4;
 
     const hit = collision.raycast(_probePos, _probeDir, probeDist, _hitDown);
 
@@ -149,6 +154,17 @@ export class ArcadeCarController {
       } else {
         this.currentSurfaceType = SurfaceType.ASPHALT;
       }
+
+      // In Free Roam: slopes steeper than ~40 degrees (normal.y < 0.766) are treated as solid walls, not drivable ground
+      if (collision.getSurfaceTypeAt && _hitDown.normal.y < 0.766 && _hitDown.normal.y > 0) {
+        this.position.addScaledVector(_hitDown.normal, 0.12);
+        this.velocity.projectOnPlane(_hitDown.normal);
+        this.speed *= 0.85;
+        this.hasBarrierContact = true;
+        this.isGrounded = false;
+        return;
+      }
+
       // Reject side walls (only snap to surfaces facing along current car up, dot > 0.35)
       const upDot = _hitDown.normal.dot(this.surfaceNormal);
       if (upDot > 0.35) {
@@ -307,6 +323,15 @@ export class ArcadeCarController {
       }
       _fwdTan.crossVectors(this.surfaceNormal, _rightTan).normalize();
 
+      // In Free Roam: slope gravity acceleration along terrain (downhill accelerates forward, uphill resists)
+      if (this.isRoamSurface) {
+        const isBrakingAtStandstill = input.brake > 0 && (this.speed === 0 || this.brakeDeadzoneTimer > 0);
+        if (!isBrakingAtStandstill && Math.abs(_fwdTan.y) > 0.01) {
+          const slopeFwdGravity = -_fwdTan.y * 11.5;
+          this.speed += slopeFwdGravity * dt;
+        }
+      }
+
       // Effective lateral friction blended exponentially over drift transition and surface
       const baseLatFriction = THREE.MathUtils.lerp(
         C.lateralFrictionNormal,
@@ -315,9 +340,14 @@ export class ArcadeCarController {
       );
       const lateralFriction = baseLatFriction * surfaceTuning.lateralFrictionMultiplier;
 
-      // Time-based exponential decay: lateralVel *= Math.exp(-lateralFriction * dt)
+      // Time-based exponential decay with lateral slope gravity in Free Roam: lateralVel *= Math.exp(-lateralFriction * dt)
       const prevLatSpeed = this.velocity.dot(_rightTan);
-      const latSpeed = prevLatSpeed * Math.exp(-lateralFriction * dt);
+      let latSpeed = prevLatSpeed;
+      if (this.isRoamSurface && Math.abs(_rightTan.y) > 0.01) {
+        const slopeLatGravity = -_rightTan.y * 11.5;
+        latSpeed += slopeLatGravity * dt;
+      }
+      latSpeed *= Math.exp(-lateralFriction * dt);
 
       _fwdVel.copy(_fwdTan).multiplyScalar(this.speed);
       _latVel.copy(_rightTan).multiplyScalar(latSpeed);
@@ -402,8 +432,10 @@ export class ArcadeCarController {
         if (hitObstacle && _hitFwd.distance < sweepDist) {
           const wallNormal = _hitFwd.normal;
           const slopeDot = wallNormal.dot(this.surfaceNormal);
+          // In Free Roam: slopes steeper than ~40 degrees (normal.y < 0.766) are steep cliffs/walls, not climbable ramps
+          const isSteepTerrain = (collision.getSurfaceTypeAt !== undefined) && (wallNormal.y < 0.766 && wallNormal.y > 0);
 
-          if (slopeDot > 0.15) {
+          if (slopeDot > 0.15 && !isSteepTerrain) {
             // Upcoming climbable ramp or incline curve!
             this.surfaceNormal.lerp(wallNormal, 0.4).normalize();
             _disp.projectOnPlane(this.surfaceNormal);

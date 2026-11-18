@@ -15,21 +15,18 @@
  * ─────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
-import { type WorldSpec, CHUNK_KEY_OFFSET, getChunkKey } from './WorldConfig';
+import { type WorldSpec, CHUNK_KEY_OFFSET, getChunkKey, BiomeType } from './WorldConfig';
 import type { TerrainHeight } from './TerrainHeight';
 import type { SpatialRoadIndex } from './RoadNetwork';
 import { RoadClass } from './RoadNetwork';
-import { getAsphaltTexture, getGrassTexture, getConcreteSidewalkTexture } from './TextureGenerator';
+import { getAsphaltTexture, getTerrainDetailTexture, getConcreteSidewalkTexture } from './TextureGenerator';
 import { ChunkCollider } from './ChunkCollider';
 import type { CityPropsGenerator } from './CityPropsGenerator';
 import type { CityPoolManager, InstancedPool } from './InstancedPool';
 import type { RoamWorld } from './RoamWorld';
 
-// Cloned textures for Free Roam procedural terrain and roads
-const roamGrassTex = getGrassTexture().clone();
-roamGrassTex.wrapS = THREE.RepeatWrapping;
-roamGrassTex.wrapT = THREE.RepeatWrapping;
-roamGrassTex.repeat.set(1, 1);
+// Dual-scale procedural detail texture for seamless natural biomes
+const terrainDetailTex = getTerrainDetailTexture();
 
 const roamAsphaltTex = getAsphaltTexture().clone();
 roamAsphaltTex.wrapS = THREE.RepeatWrapping;
@@ -43,7 +40,7 @@ roamSidewalkTex.repeat.set(1, 16);
 
 // Shared Materials (Created once, cached at module scope)
 const terrainMat = new THREE.MeshStandardMaterial({
-  map: roamGrassTex,
+  map: terrainDetailTex,
   vertexColors: true,
   roughness: 0.88,
   metalness: 0.04,
@@ -110,32 +107,120 @@ const yellowStripeMat = new THREE.MeshBasicMaterial({
   polygonOffsetUnits: -4,
 });
 
-// Pre-allocated static index buffer for 32x32 quad grid
-const GRID_RES = 32;
-const VERT_COUNT = (GRID_RES + 1) * (GRID_RES + 1); // 33 * 33 = 1089
-const TRI_COUNT = GRID_RES * GRID_RES * 2;          // 2048
-const INDEX_COUNT = TRI_COUNT * 3;                  // 6144
-const SHARED_GRID_INDICES = new Uint16Array(INDEX_COUNT);
+// Two Levels of Detail (LOD 0: 32x32 full resolution, LOD 1: 16x16 half resolution)
+// Mesh resolution of 4m quads is sufficient for slopes up to 35+ degrees.
+// 4-meter perimeter seam skirts seal any T-junction gaps between LOD levels completely.
+const GRID_RES_LOD0 = 32;
+const GRID_RES_LOD1 = 16;
+const MAX_VERT_COUNT = (GRID_RES_LOD0 + 1) * (GRID_RES_LOD0 + 1) + GRID_RES_LOD0 * 4; // 1089 + 128 = 1217
 
-{
+function buildChunkIndices(N: number): Uint16Array {
+  const gridQuads = N * N;
+  const skirtQuads = N * 4;
+  const totalIndices = (gridQuads + skirtQuads) * 6;
+  const indices = new Uint16Array(totalIndices);
+
   let idx = 0;
-  for (let j = 0; j < GRID_RES; j++) {
-    for (let i = 0; i < GRID_RES; i++) {
-      const a = j * (GRID_RES + 1) + i;
-      const b = j * (GRID_RES + 1) + (i + 1);
-      const c = (j + 1) * (GRID_RES + 1) + i;
-      const d = (j + 1) * (GRID_RES + 1) + (i + 1);
+  const stride = N + 1;
+  const gridVertCount = stride * stride;
 
-      SHARED_GRID_INDICES[idx++] = a;
-      SHARED_GRID_INDICES[idx++] = c;
-      SHARED_GRID_INDICES[idx++] = b;
+  // 1. Grid Quads
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const a = j * stride + i;
+      const b = j * stride + (i + 1);
+      const c = (j + 1) * stride + i;
+      const d = (j + 1) * stride + (i + 1);
 
-      SHARED_GRID_INDICES[idx++] = b;
-      SHARED_GRID_INDICES[idx++] = c;
-      SHARED_GRID_INDICES[idx++] = d;
+      indices[idx++] = a;
+      indices[idx++] = c;
+      indices[idx++] = b;
+
+      indices[idx++] = b;
+      indices[idx++] = c;
+      indices[idx++] = d;
     }
   }
+
+  // 2. Outward-Facing Skirt Quads around perimeter
+  let skirtBase = gridVertCount;
+  let currSkirt = 0;
+
+  // South (j=0)
+  for (let i = 0; i < N; i++) {
+    const t0 = 0 * stride + i;
+    const t1 = 0 * stride + (i + 1);
+    const b0 = skirtBase + currSkirt;
+    const b1 = skirtBase + (currSkirt + 1);
+    currSkirt++;
+
+    indices[idx++] = t0;
+    indices[idx++] = t1;
+    indices[idx++] = b0;
+
+    indices[idx++] = t1;
+    indices[idx++] = b1;
+    indices[idx++] = b0;
+  }
+
+  // East (i=N)
+  for (let j = 0; j < N; j++) {
+    const t0 = j * stride + N;
+    const t1 = (j + 1) * stride + N;
+    const b0 = skirtBase + currSkirt;
+    const b1 = skirtBase + (currSkirt + 1);
+    currSkirt++;
+
+    indices[idx++] = t0;
+    indices[idx++] = t1;
+    indices[idx++] = b0;
+
+    indices[idx++] = t1;
+    indices[idx++] = b1;
+    indices[idx++] = b0;
+  }
+
+  // North (j=N)
+  for (let i = N; i > 0; i--) {
+    const t0 = N * stride + i;
+    const t1 = N * stride + (i - 1);
+    const b0 = skirtBase + currSkirt;
+    const b1 = skirtBase + (currSkirt + 1);
+    currSkirt++;
+
+    indices[idx++] = t0;
+    indices[idx++] = t1;
+    indices[idx++] = b0;
+
+    indices[idx++] = t1;
+    indices[idx++] = b1;
+    indices[idx++] = b0;
+  }
+
+  // West (i=0)
+  for (let j = N; j > 0; j--) {
+    const t0 = j * stride + 0;
+    const t1 = (j - 1) * stride + 0;
+    const b0 = skirtBase + currSkirt;
+    const b1 = skirtBase + ((currSkirt + 1) % (N * 4));
+    currSkirt++;
+
+    indices[idx++] = t0;
+    indices[idx++] = t1;
+    indices[idx++] = b0;
+
+    indices[idx++] = t1;
+    indices[idx++] = b1;
+    indices[idx++] = b0;
+  }
+
+  return indices;
 }
+
+const SHARED_LOD0_INDICES = buildChunkIndices(GRID_RES_LOD0); // 6912
+const SHARED_LOD1_INDICES = buildChunkIndices(GRID_RES_LOD1); // 1920
+const SHARED_LOD0_INDEX_ATTR = new THREE.BufferAttribute(SHARED_LOD0_INDICES, 1);
+const SHARED_LOD1_INDEX_ATTR = new THREE.BufferAttribute(SHARED_LOD1_INDICES, 1);
 
 // Scratch reusable vector for normal calculation
 const _normalScratch = new THREE.Vector3();
@@ -214,10 +299,10 @@ export class TerrainChunk {
   constructor() {
     this.terrainGeo = new THREE.BufferGeometry();
 
-    const positions = new Float32Array(VERT_COUNT * 3);
-    const normals = new Float32Array(VERT_COUNT * 3);
-    const colors = new Float32Array(VERT_COUNT * 3);
-    const uvs = new Float32Array(VERT_COUNT * 2);
+    const positions = new Float32Array(MAX_VERT_COUNT * 3);
+    const normals = new Float32Array(MAX_VERT_COUNT * 3);
+    const colors = new Float32Array(MAX_VERT_COUNT * 3);
+    const uvs = new Float32Array(MAX_VERT_COUNT * 2);
 
     this.posAttr = new THREE.BufferAttribute(positions, 3);
     this.normAttr = new THREE.BufferAttribute(normals, 3);
@@ -228,7 +313,7 @@ export class TerrainChunk {
     this.terrainGeo.setAttribute('normal', this.normAttr);
     this.terrainGeo.setAttribute('color', this.colAttr);
     this.terrainGeo.setAttribute('uv', this.uvAttr);
-    this.terrainGeo.setIndex(new THREE.BufferAttribute(SHARED_GRID_INDICES, 1));
+    this.terrainGeo.setIndex(SHARED_LOD0_INDEX_ATTR);
 
     this.terrainMesh = new THREE.Mesh(this.terrainGeo, terrainMat);
     this.terrainMesh.receiveShadow = true;
@@ -245,35 +330,44 @@ export class TerrainChunk {
     spec: WorldSpec,
     propsGenerator?: CityPropsGenerator,
     poolManager?: CityPoolManager,
-    roamWorld?: RoamWorld
+    roamWorld?: RoamWorld,
+    lod: 0 | 1 = 0
   ): void {
     this.cx = cx;
     this.cz = cz;
     this.isActive = true;
     this.group.visible = true;
 
+    const N = lod === 0 ? GRID_RES_LOD0 : GRID_RES_LOD1;
+    const stride = N + 1;
     const chunkSize = spec.chunkSize;
     const originX = cx * chunkSize;
     const originZ = cz * chunkSize;
-    const step = chunkSize / GRID_RES;
+    const step = chunkSize / N;
 
     const pos = this.posAttr.array as Float32Array;
     const norm = this.normAttr.array as Float32Array;
     const col = this.colAttr.array as Float32Array;
     const uv = this.uvAttr.array as Float32Array;
 
-    // Grass, Dirt shoulder & Mountain Rock palette colors
-    const grassR = 0.36, grassG = 0.58, grassB = 0.26;
-    const dirtR  = 0.50, dirtG  = 0.40, dirtB  = 0.28;
-    const rockR  = 0.42, rockG  = 0.42, rockB  = 0.40;
+    // Biome base palette colors:
+    const sandR   = 0.86, sandG   = 0.78, sandB   = 0.58;
+    const grassR  = 0.34, grassG  = 0.58, grassB  = 0.24;
+    const forestR = 0.18, forestG = 0.38, forestB = 0.16;
+    const rockR   = 0.44, rockG   = 0.44, rockB   = 0.42;
+    const urbanR  = 0.38, urbanG  = 0.44, urbanB  = 0.34;
+    const dirtR   = 0.50, dirtG   = 0.40, dirtB   = 0.28;
 
+    const landforms = terrainHeight.landforms;
+
+    // 1. Fill Grid Vertices (N+1) x (N+1)
     let vIdx = 0;
     let cIdx = 0;
     let uvIdx = 0;
 
-    for (let j = 0; j <= GRID_RES; j++) {
+    for (let j = 0; j <= N; j++) {
       const z = originZ + j * step;
-      for (let i = 0; i <= GRID_RES; i++) {
+      for (let i = 0; i <= N; i++) {
         const x = originX + i * step;
         let y = terrainHeight.groundHeightAt(x, z);
 
@@ -301,6 +395,37 @@ export class TerrainChunk {
         uv[uvIdx]     = x / 6.0;
         uv[uvIdx + 1] = z / 6.0;
 
+        // Determine base biome color
+        const biome = landforms ? landforms.getBiome(x, z) : BiomeType.MEADOW;
+        let r = grassR, g = grassG, b = grassB;
+        switch (biome) {
+          case BiomeType.BEACH:
+            r = sandR; g = sandG; b = sandB;
+            break;
+          case BiomeType.FOREST:
+            r = forestR; g = forestG; b = forestB;
+            break;
+          case BiomeType.ROCK:
+            r = rockR; g = rockG; b = rockB;
+            break;
+          case BiomeType.URBAN:
+            r = urbanR; g = urbanG; b = urbanB;
+            break;
+          case BiomeType.MEADOW:
+          default:
+            r = grassR; g = grassG; b = grassB;
+            break;
+        }
+
+        // Steeper slopes show rock / scree (slope > 25° starts rock, > 44° solid rock)
+        if (_normalScratch.y < 0.90) {
+          const rockWeight = Math.min(1.0, (0.90 - _normalScratch.y) / 0.18);
+          r = (1 - rockWeight) * r + rockWeight * rockR;
+          g = (1 - rockWeight) * g + rockWeight * rockG;
+          b = (1 - rockWeight) * b + rockWeight * rockB;
+        }
+
+        // Road shoulder dirt blending near asphalt
         let dirtWeight = 0;
         if (nearest) {
           const distToRoadEdge = Math.max(0, nearest.distance - nearest.roadHalfWidth);
@@ -309,23 +434,11 @@ export class TerrainChunk {
           }
         }
 
-        // Steeper slopes show granite rock
-        let rockWeight = 0;
-        if (_normalScratch.y < 0.90) {
-          rockWeight = Math.min(1.0, (0.90 - _normalScratch.y) * 5.0);
-        }
-
         // Subtle per-vertex noise variation for natural meadow mottling
         const mottle = (((i * 19 + j * 37) % 13) - 6) / 100;
-        let baseR = Math.max(0, grassR + mottle);
-        let baseG = Math.max(0, grassG + mottle);
-        let baseB = Math.max(0, grassB + mottle);
-
-        if (rockWeight > 0) {
-          baseR = (1 - rockWeight) * baseR + rockWeight * rockR;
-          baseG = (1 - rockWeight) * baseG + rockWeight * rockG;
-          baseB = (1 - rockWeight) * baseB + rockWeight * rockB;
-        }
+        let baseR = Math.max(0, r + mottle);
+        let baseG = Math.max(0, g + mottle);
+        let baseB = Math.max(0, b + mottle);
 
         col[cIdx]     = (1 - dirtWeight) * baseR + dirtWeight * dirtR;
         col[cIdx + 1] = (1 - dirtWeight) * baseG + dirtWeight * dirtG;
@@ -335,6 +448,57 @@ export class TerrainChunk {
         cIdx += 3;
         uvIdx += 2;
       }
+    }
+
+    // 2. Fill Perimeter 4m Seam Skirt Vertices (4 * N vertices)
+    const appendSkirtVert = (topGridIdx: number, outwardX: number, outwardZ: number) => {
+      const topPos = topGridIdx * 3;
+      const topUv = topGridIdx * 2;
+
+      pos[vIdx]     = pos[topPos];
+      pos[vIdx + 1] = pos[topPos + 1] - 4.0; // 4m vertical drop sealing any LOD T-junction seams
+      pos[vIdx + 2] = pos[topPos + 2];
+
+      norm[vIdx]     = outwardX;
+      norm[vIdx + 1] = 0;
+      norm[vIdx + 2] = outwardZ;
+
+      col[cIdx]     = col[topPos] * 0.72;
+      col[cIdx + 1] = col[topPos + 1] * 0.72;
+      col[cIdx + 2] = col[topPos + 2] * 0.72;
+
+      uv[uvIdx]     = uv[topUv];
+      uv[uvIdx + 1] = uv[topUv + 1];
+
+      vIdx += 3;
+      cIdx += 3;
+      uvIdx += 2;
+    };
+
+    // South (j=0, i from 0 to N-1)
+    for (let i = 0; i < N; i++) {
+      appendSkirtVert(0 * stride + i, 0, -1);
+    }
+    // East (i=N, j from 0 to N-1)
+    for (let j = 0; j < N; j++) {
+      appendSkirtVert(j * stride + N, 1, 0);
+    }
+    // North (j=N, i from N down to 1)
+    for (let i = N; i > 0; i--) {
+      appendSkirtVert(N * stride + i, 0, 1);
+    }
+    // West (i=0, j from N down to 1)
+    for (let j = N; j > 0; j--) {
+      appendSkirtVert(j * stride + 0, -1, 0);
+    }
+
+    // Bind LOD Index Buffer and configure Draw Range
+    if (lod === 0) {
+      this.terrainGeo.setIndex(SHARED_LOD0_INDEX_ATTR);
+      this.terrainGeo.setDrawRange(0, SHARED_LOD0_INDICES.length);
+    } else {
+      this.terrainGeo.setIndex(SHARED_LOD1_INDEX_ATTR);
+      this.terrainGeo.setDrawRange(0, SHARED_LOD1_INDICES.length);
     }
 
     this.posAttr.needsUpdate = true;
@@ -793,6 +957,9 @@ export class ChunkManager {
 
         // Get chunk from pool or instantiate if pool empty
         const chunk = this.chunkPool.length > 0 ? this.chunkPool.pop()! : new TerrainChunk();
+        const dx = cx - playerCx;
+        const dz = cz - playerCz;
+        const lod: 0 | 1 = (dx * dx + dz * dz <= 4) ? 0 : 1;
         chunk.build(
           cx,
           cz,
@@ -801,7 +968,8 @@ export class ChunkManager {
           this.spec,
           this.propsGenerator,
           this.poolManager,
-          this.roamWorld
+          this.roamWorld,
+          lod
         );
 
         this.loadedChunks.set(key, chunk);
@@ -844,6 +1012,7 @@ export class ChunkManager {
 
           if (!this.loadedChunks.has(key)) {
             const chunk = this.chunkPool.length > 0 ? this.chunkPool.pop()! : new TerrainChunk();
+            const lod: 0 | 1 = (dx * dx + dz * dz <= 4) ? 0 : 1;
             chunk.build(
               cx,
               cz,
@@ -852,7 +1021,8 @@ export class ChunkManager {
               this.spec,
               this.propsGenerator,
               this.poolManager,
-              this.roamWorld
+              this.roamWorld,
+              lod
             );
             this.loadedChunks.set(key, chunk);
             this.rootGroup.add(chunk.group);

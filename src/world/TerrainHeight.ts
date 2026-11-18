@@ -17,74 +17,13 @@ import * as THREE from 'three';
 import type { WorldSpec } from './WorldConfig';
 import { SurfaceType } from './WorldConfig';
 import { SpatialRoadIndex, type RoadGraph } from './RoadNetwork';
-
-// ── Deterministic 2D Gradient Noise Generator ────────────────
-class PerlinNoise2D {
-  private readonly perm = new Uint8Array(512);
-
-  constructor(seed: number) {
-    const p = new Uint8Array(256);
-    for (let i = 0; i < 256; i++) p[i] = i;
-
-    // Fisher-Yates shuffle with seeded LCG
-    let state = (seed ^ 0x6c62272e) % 2147483647;
-    if (state <= 0) state += 2147483646;
-
-    for (let i = 255; i > 0; i--) {
-      state = (state * 16807) % 2147483647;
-      const j = Math.floor(((state - 1) / 2147483646) * (i + 1));
-      const tmp = p[i];
-      p[i] = p[j];
-      p[j] = tmp;
-    }
-
-    for (let i = 0; i < 512; i++) {
-      this.perm[i] = p[i & 255];
-    }
-  }
-
-  private fade(t: number): number {
-    return t * t * t * (t * (t * 6 - 15) + 10);
-  }
-
-  private lerp(a: number, b: number, t: number): number {
-    return a + t * (b - a);
-  }
-
-  private grad(hash: number, x: number, z: number): number {
-    const h = hash & 7;
-    const u = h < 4 ? x : z;
-    const v = h < 4 ? z : x;
-    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
-  }
-
-  sample(x: number, z: number): number {
-    const X = Math.floor(x) & 255;
-    const Z = Math.floor(z) & 255;
-
-    const xf = x - Math.floor(x);
-    const zf = z - Math.floor(z);
-
-    const u = this.fade(xf);
-    const v = this.fade(zf);
-
-    const aa = this.perm[this.perm[X] + Z];
-    const ab = this.perm[this.perm[X] + Z + 1];
-    const ba = this.perm[this.perm[X + 1] + Z];
-    const bb = this.perm[this.perm[X + 1] + Z + 1];
-
-    const x1 = this.lerp(this.grad(aa, xf, zf), this.grad(ba, xf - 1, zf), u);
-    const x2 = this.lerp(this.grad(ab, xf, zf - 1), this.grad(bb, xf - 1, zf - 1), u);
-
-    return this.lerp(x1, x2, v);
-  }
-}
+import { Landforms } from './Landforms';
 
 export class TerrainHeight {
   readonly spec: WorldSpec;
-  readonly roadIndex: SpatialRoadIndex;
-  readonly graph: RoadGraph;
-  private readonly noise: PerlinNoise2D;
+  readonly landforms: Landforms;
+  roadIndex: SpatialRoadIndex | null = null;
+  graph: RoadGraph | null = null;
 
   private readonly blendMargin = 16.0; // 16m embankment blend width
 
@@ -96,13 +35,25 @@ export class TerrainHeight {
   private readonly cacheValid = new Uint8Array(TerrainHeight.CACHE_SIZE);
   private cacheHead = 0;
 
-  constructor(spec: WorldSpec, roadIndex: SpatialRoadIndex) {
+  constructor(
+    spec: WorldSpec,
+    roadIndex?: SpatialRoadIndex | null,
+    landforms?: Landforms
+  ) {
     this.spec = spec;
+    this.landforms = landforms ?? new Landforms(spec);
+
+    if (roadIndex) {
+      this.setRoadIndex(roadIndex);
+    }
+  }
+
+  /**
+   * Injects or updates the spatial road index after roads have been routed over Landforms.
+   */
+  setRoadIndex(roadIndex: SpatialRoadIndex): void {
     this.roadIndex = roadIndex;
     this.graph = roadIndex.graph;
-    this.noise = new PerlinNoise2D(spec.seed);
-
-    // Compute smooth road node elevations
     this.computeNodeElevations();
   }
 
@@ -115,29 +66,20 @@ export class TerrainHeight {
   }
 
   private computeNodeElevations(): void {
+    if (!this.graph) return;
     const nodes = this.graph.nodes;
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
-      node.elevation = this.rawTerrainHeight(node.x, node.z);
+      node.elevation = this.landforms.getHeight(node.x, node.z);
     }
   }
 
   /**
-   * Natural multi-octave rolling hills noise (amplitude up to ~10m).
+   * Pure landform height at (x, z) before road corridor blending.
+   * Preserved for backwards compatibility with existing test suites.
    */
   rawTerrainHeight(x: number, z: number): number {
-    const maxElev = this.spec.maxElevation;
-
-    // Octave 1: Grand rolling hills (wavelength ~550m)
-    const n1 = this.noise.sample(x / 550, z / 550) * 0.60;
-    // Octave 2: Medium knolls (wavelength ~220m)
-    const n2 = this.noise.sample(x / 220 + 31.4, z / 220 + 17.8) * 0.28;
-    // Octave 3: Gentle surface variation (wavelength ~85m)
-    const n3 = this.noise.sample(x / 85 + 71.2, z / 85 + 53.1) * 0.12;
-
-    const normalized = (n1 + n2 + n3); // roughly [-0.7, 0.7]
-    // Base elevation at 2.5m, oscillating between ~0.5m and ~9.5m
-    return Math.max(0.5, 2.5 + normalized * (maxElev * 0.65));
+    return this.landforms.getHeight(x, z);
   }
 
   /**
@@ -156,33 +98,35 @@ export class TerrainHeight {
       }
     }
 
-    const rawH = this.rawTerrainHeight(x, z);
+    const rawH = this.landforms.getHeight(x, z);
 
     let h = rawH;
-    // Query nearest road within road width + blend margin
-    const nearest = this.roadIndex.getNearestRoad(x, z, 40.0);
-    if (nearest) {
-      const d = nearest.distance;
-      const w = nearest.roadHalfWidth;
+    // Query nearest road within road width + blend margin if roadIndex is available
+    if (this.roadIndex) {
+      const nearest = this.roadIndex.getNearestRoad(x, z, 40.0);
+      if (nearest) {
+        const d = nearest.distance;
+        const w = nearest.roadHalfWidth;
 
-      // Centerline road elevation following smooth terrain profile
-      const roadH = this.rawTerrainHeight(nearest.projectedX, nearest.projectedZ);
+        // Centerline road elevation following landform profile
+        const roadH = this.landforms.getHeight(nearest.projectedX, nearest.projectedZ);
 
-      // 1. Directly on road deck: +0.08m asphalt pavement thickness
-      if (d <= w) {
-        h = roadH + 0.08;
-      } else {
-        // 2. Flat road shoulder / curb step (within 4m beyond asphalt edge)
-        const shoulderMargin = 4.0;
-        if (d <= w + shoulderMargin) {
-          // Smooth curb drop from asphalt surface down to grass/dirt shoulder
-          const curbT = Math.min(1.0, (d - w) / 0.8);
-          h = roadH + 0.08 * (1 - curbT);
-        } else if (d < w + shoulderMargin + this.blendMargin) {
-          // 3. Embankment transition into natural rolling hills
-          const u = (d - (w + shoulderMargin)) / this.blendMargin;
-          const k = u * u * (3 - 2 * u); // Cubic smoothstep
-          h = (1 - k) * roadH + k * rawH;
+        // 1. Directly on road deck: +0.08m asphalt pavement thickness
+        if (d <= w) {
+          h = roadH + 0.08;
+        } else {
+          // 2. Flat road shoulder / curb step (within 4m beyond asphalt edge)
+          const shoulderMargin = 4.0;
+          if (d <= w + shoulderMargin) {
+            // Smooth curb drop from asphalt surface down to grass/dirt shoulder
+            const curbT = Math.min(1.0, (d - w) / 0.8);
+            h = roadH + 0.08 * (1 - curbT);
+          } else if (d < w + shoulderMargin + this.blendMargin) {
+            // 3. Embankment transition into natural landforms
+            const u = (d - (w + shoulderMargin)) / this.blendMargin;
+            const k = u * u * (3 - 2 * u); // Cubic smoothstep
+            h = (1 - k) * roadH + k * rawH;
+          }
         }
       }
     }
@@ -219,6 +163,8 @@ export class TerrainHeight {
    * Classifies surface type based on proximity to road centerline.
    */
   getSurfaceTypeAt(x: number, z: number): SurfaceType {
+    if (!this.roadIndex) return SurfaceType.GRASS;
+
     const nearest = this.roadIndex.getNearestRoad(x, z, 28.0);
     if (!nearest) return SurfaceType.GRASS;
 

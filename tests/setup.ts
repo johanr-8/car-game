@@ -21,6 +21,8 @@ if (typeof document === 'undefined') {
             moveTo: () => {},
             lineTo: () => {},
             createRadialGradient: () => ({ addColorStop: () => {} }),
+            createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+            putImageData: () => {},
           }),
         };
       }

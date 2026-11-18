@@ -436,12 +436,29 @@ export class RaceSystem {
         this.roamWorld.startPhysicsTick();
         this.vehicleSystem.updatePhysics(dt, input, this.roamWorld);
         const player = this.vehicleSystem.playerVehicle;
-        if (player.controller.position.y < -50) {
+
+        // Water hazard check: driving into water deeper than 1m triggers splash & respawn
+        const waterHazard = this.roamWorld.waterSystem.checkWaterHazard(
+          player.controller.position.x,
+          player.controller.position.y,
+          player.controller.position.z
+        );
+        if (waterHazard.isSubmerged) {
+          this.hudSystem.raceHUD.showTrickPopup('SPLASH! WATER HAZARD', 'rgba(56, 189, 248, 0.95)');
+          this.respawnRoam();
+        } else if (player.controller.position.y < -50) {
           this.respawnRoam();
         }
+
         if (this.hudSystem) {
           this.hudSystem.stats.roadQueriesPerTick = this.roamWorld.roadIndex.callsThisTick;
           this.hudSystem.stats.unavoidableAllocs = 0;
+          this.hudSystem.stats.biomeName = this.roamWorld.terrainHeight.landforms
+            ? this.roamWorld.terrainHeight.landforms.getBiome(player.controller.position.x, player.controller.position.z)
+            : 'MEADOW';
+          this.hudSystem.stats.slopeDeg = this.roamWorld.terrainHeight.landforms
+            ? (Math.atan(this.roamWorld.terrainHeight.landforms.getSlope(player.controller.position.x, player.controller.position.z)) * 180) / Math.PI
+            : 0;
         }
       }
       return;

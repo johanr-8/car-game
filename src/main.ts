@@ -302,7 +302,7 @@ function loop(): void {
   if (raceSystem.gameMode === GameMode.RACE && raceSystem.worldSystem) {
     raceSystem.worldSystem.updateVisuals(streamX, streamZ);
   } else if (raceSystem.gameMode === GameMode.ROAM && raceSystem.roamWorld) {
-    raceSystem.roamWorld.updateVisuals(streamX, streamZ);
+    raceSystem.roamWorld.updateVisuals(streamX, streamZ, dt);
     hudSystem.stats.loadedChunks = raceSystem.roamWorld.loadedChunksCount;
     hudSystem.stats.chunkBuildMs = raceSystem.roamWorld.chunkBuildMs;
   }

@@ -23,9 +23,49 @@ export interface WorldSpec {
   maxBuildMsPerFrame: number;
   /** Grid subdivisions per chunk (e.g. 32 -> 32x32 quads). */
   terrainResolution: number;
-  /** Maximum elevation amplitude in meters for rolling hills. */
+  /** Maximum elevation amplitude in meters for rolling hills and mountain ridges. */
   maxElevation: number;
+  /** Macro geographical shape specifications. */
+  macroLandforms?: MacroLandformConfig;
 }
+
+export enum BiomeType {
+  BEACH = 'BEACH',
+  MEADOW = 'MEADOW',
+  FOREST = 'FOREST',
+  ROCK = 'ROCK',
+  URBAN = 'URBAN',
+}
+
+export interface MacroLandformConfig {
+  seaLevel: number;
+  coastStartX: number;
+  coastEndX: number;
+  oceanFloorDepth: number;
+  cityBasinRadius: number;
+  cityBasinElevation: number;
+  mountainPeakElevation: number;
+  mountainPassElevation: number;
+  lakeCenter: { x: number; z: number };
+  lakeRadius: number;
+  lakeSurfaceElevation: number;
+  lakeBedElevation: number;
+}
+
+export const DEFAULT_MACRO_LANDFORMS: MacroLandformConfig = {
+  seaLevel: 0.0,
+  coastStartX: -1050.0,
+  coastEndX: -1800.0,
+  oceanFloorDepth: -18.0,
+  cityBasinRadius: 650.0,
+  cityBasinElevation: 10.0,
+  mountainPeakElevation: 180.0,
+  mountainPassElevation: 48.0,
+  lakeCenter: { x: 320.0, z: -760.0 },
+  lakeRadius: 260.0,
+  lakeSurfaceElevation: 8.0,
+  lakeBedElevation: 4.0,
+};
 
 export const DEFAULT_WORLD_SPEC: WorldSpec = {
   worldSize: 4000,
@@ -35,7 +75,8 @@ export const DEFAULT_WORLD_SPEC: WorldSpec = {
   unloadRadius: 6,
   maxBuildMsPerFrame: 2.0,
   terrainResolution: 32,
-  maxElevation: 10.0,
+  maxElevation: 200.0,
+  macroLandforms: DEFAULT_MACRO_LANDFORMS,
 };
 
 /**

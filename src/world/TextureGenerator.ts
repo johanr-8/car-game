@@ -14,6 +14,7 @@ import * as THREE from 'three';
 
 let cachedAsphaltTex: THREE.CanvasTexture | null = null;
 let cachedGrassTex: THREE.CanvasTexture | null = null;
+let cachedTerrainDetailTex: THREE.CanvasTexture | null = null;
 let cachedPlazaTex: THREE.CanvasTexture | null = null;
 let cachedBrickTex: THREE.CanvasTexture | null = null;
 let cachedWarehouseTex: THREE.CanvasTexture | null = null;
@@ -58,6 +59,56 @@ export function getAsphaltTexture(): THREE.CanvasTexture {
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(4, 32);
   cachedAsphaltTex = tex;
+  return tex;
+}
+
+/**
+ * Tiling Dual-Frequency Terrain Detail Texture (512x512)
+ * Combines two incommensurate noise frequencies (~73px & ~17px) with fine mineral grain
+ * to break up grid repetition completely across sand, grass, dirt, and rock biomes.
+ */
+export function getTerrainDetailTexture(): THREE.CanvasTexture {
+  if (cachedTerrainDetailTex) return cachedTerrainDetailTex;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  if (ctx && typeof ctx.createImageData === 'function') {
+    const imgData = ctx.createImageData(512, 512);
+    const data = imgData.data;
+
+    // Dual-frequency procedural value noise synthesis
+    for (let y = 0; y < 512; y++) {
+      for (let x = 0; x < 512; x++) {
+        // Frequency 1 (macro organic variation, wavelength ~73px)
+        const w1 = Math.sin(x * 0.086 + y * 0.041) * Math.cos(y * 0.079 - x * 0.035);
+        // Frequency 2 (fine surface turbulence, wavelength ~17px)
+        const w2 = Math.sin(x * 0.37 + y * 0.28) * Math.cos(y * 0.33 - x * 0.25);
+        // High-frequency granular stippling
+        const grain = (Math.random() - 0.5) * 0.16;
+
+        const val = Math.max(0, Math.min(255, Math.round(128 + (w1 * 0.22 + w2 * 0.14 + grain) * 255)));
+
+        const idx = (y * 512 + x) * 4;
+        data[idx]     = val;
+        data[idx + 1] = val;
+        data[idx + 2] = val;
+        data[idx + 3] = 255;
+      }
+    }
+
+    if (typeof ctx.putImageData === 'function') {
+      ctx.putImageData(imgData, 0, 0);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(64, 64);
+  cachedTerrainDetailTex = tex;
   return tex;
 }
 
