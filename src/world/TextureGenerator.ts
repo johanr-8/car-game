@@ -15,6 +15,9 @@ import * as THREE from 'three';
 let cachedAsphaltTex: THREE.CanvasTexture | null = null;
 let cachedGrassTex: THREE.CanvasTexture | null = null;
 let cachedPlazaTex: THREE.CanvasTexture | null = null;
+let cachedBrickTex: THREE.CanvasTexture | null = null;
+let cachedWarehouseTex: THREE.CanvasTexture | null = null;
+let cachedHouseTex: THREE.CanvasTexture | null = null;
 const cachedBuildingTextures: (THREE.CanvasTexture | null)[] = [null, null, null, null];
 
 /**
@@ -209,5 +212,191 @@ export function getBuildingTexture(style: number): THREE.CanvasTexture {
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(4, 8);
   cachedBuildingTextures[style] = tex;
+  return tex;
+}
+
+/**
+ * Traditional Red/Brown Brick Facade Texture with Mortar & Windows (256x512)
+ */
+export function getBrickTexture(): THREE.CanvasTexture {
+  if (cachedBrickTex) return cachedBrickTex;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  // Base brick color
+  ctx.fillStyle = '#8f3d32';
+  ctx.fillRect(0, 0, 256, 512);
+
+  // Brick rows & mortar courses
+  ctx.strokeStyle = '#d4cec5';
+  ctx.lineWidth = 1;
+  const rowH = 8;
+  const brickW = 16;
+  for (let y = 0; y < 512; y += rowH) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(256, y);
+    ctx.stroke();
+
+    const isOffset = (y / rowH) % 2 === 1;
+    const startX = isOffset ? -brickW / 2 : 0;
+    for (let x = startX; x < 256; x += brickW) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + rowH);
+      ctx.stroke();
+    }
+  }
+
+  // Windows with white stone lintels and sills
+  const cols = 6;
+  const rows = 12;
+  const colStep = 256 / cols;
+  const rowStep = 512 / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const wx = c * colStep + 8;
+      const wy = r * rowStep + 10;
+      const ww = colStep - 16;
+      const wh = rowStep - 18;
+
+      // Stone lintel (top)
+      ctx.fillStyle = '#ece8e1';
+      ctx.fillRect(wx - 2, wy - 3, ww + 4, 3);
+      // Stone sill (bottom)
+      ctx.fillRect(wx - 2, wy + wh, ww + 4, 3);
+
+      // Window Frame & Glass
+      ctx.fillStyle = '#22262f';
+      ctx.fillRect(wx, wy, ww, wh);
+      ctx.fillStyle = Math.random() > 0.4 ? '#38bdf8' : '#1e293b';
+      ctx.fillRect(wx + 2, wy + 2, ww - 4, wh - 4);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4, 8);
+  cachedBrickTex = tex;
+  return tex;
+}
+
+/**
+ * Industrial Corrugated Metal Warehouse Texture with Roll-up Bay Doors (256x256)
+ */
+export function getWarehouseTexture(): THREE.CanvasTexture {
+  if (cachedWarehouseTex) return cachedWarehouseTex;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  // Corrugated steel base
+  ctx.fillStyle = '#64748b';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Corrugation ribs
+  for (let x = 0; x < 256; x += 4) {
+    ctx.fillStyle = x % 8 === 0 ? '#475569' : '#94a3b8';
+    ctx.fillRect(x, 0, 2, 256);
+  }
+
+  // Large roll-up freight bay door in lower half
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(32, 120, 192, 136);
+
+  // Door slats
+  ctx.fillStyle = '#1e293b';
+  for (let y = 120; y < 256; y += 6) {
+    ctx.fillRect(32, y, 192, 2);
+  }
+
+  // Yellow & black hazard threshold stripe
+  ctx.fillStyle = '#facc15';
+  ctx.fillRect(32, 250, 192, 6);
+  ctx.fillStyle = '#0f172a';
+  for (let x = 32; x < 224; x += 16) {
+    ctx.fillRect(x, 250, 8, 6);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  cachedWarehouseTex = tex;
+  return tex;
+}
+
+/**
+ * Suburban Residential House Siding Texture with Windows & Door (256x256)
+ */
+export function getHouseTexture(): THREE.CanvasTexture {
+  if (cachedHouseTex) return cachedHouseTex;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  // Warm siding base
+  ctx.fillStyle = '#e8ecf2';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Horizontal lap siding boards
+  ctx.fillStyle = '#cbd5e1';
+  for (let y = 0; y < 256; y += 8) {
+    ctx.fillRect(0, y, 256, 1);
+  }
+
+  // Upper Windows
+  const winColor = '#38bdf8';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(36, 40, 52, 64);
+  ctx.fillRect(168, 40, 52, 64);
+
+  ctx.fillStyle = winColor;
+  ctx.fillRect(40, 44, 44, 56);
+  ctx.fillRect(172, 44, 44, 56);
+
+  // Window mullions (cross)
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(61, 44, 2, 56);
+  ctx.fillRect(40, 71, 44, 2);
+  ctx.fillRect(193, 44, 2, 56);
+  ctx.fillRect(172, 71, 44, 2);
+
+  // Front Entrance Door (ground level)
+  ctx.fillStyle = '#1e3a5f';
+  ctx.fillRect(108, 148, 40, 108);
+  // White door casing
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 3;
+  if (typeof ctx.strokeRect === 'function') {
+    ctx.strokeRect(108, 148, 40, 108);
+  } else if (typeof ctx.stroke === 'function' && typeof ctx.rect === 'function') {
+    ctx.beginPath?.();
+    ctx.rect(108, 148, 40, 108);
+    ctx.stroke();
+  }
+  // Brass doorknob
+  ctx.fillStyle = '#f59e0b';
+  if (typeof ctx.arc === 'function') {
+    ctx.beginPath?.();
+    ctx.arc(140, 204, 3, 0, Math.PI * 2);
+    ctx.fill?.();
+  } else {
+    ctx.fillRect(138, 202, 4, 4);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1);
+  cachedHouseTex = tex;
   return tex;
 }

@@ -19,6 +19,14 @@ import { generateRoadNetwork, SpatialRoadIndex, type RoadGraph } from './RoadNet
 import { TerrainHeight } from './TerrainHeight';
 import { ChunkManager } from './ChunkManager';
 import { CITY_THEMES, type CityTheme } from './TimeOfDay';
+import { DistrictMap } from './DistrictMap';
+import { createLandmarkDefs, type LandmarkDef } from './Landmarks';
+import { CityPoolManager } from './InstancedPool';
+import { CityPropsGenerator } from './CityPropsGenerator';
+import type { ChunkCollider } from './ChunkCollider';
+
+const _scratchSolidPoint = new THREE.Vector3();
+const _scratchSolidNormal = new THREE.Vector3();
 
 // Highway Spawn Point: Spawns on the 22m-wide diagonal highway heading Northeast
 export const ROAM_SPAWN_POS = new THREE.Vector3(-800, 2.84, -800);
@@ -33,9 +41,18 @@ export class RoamWorld implements SurfaceProvider {
   readonly roadGraph: RoadGraph;
   readonly roadIndex: SpatialRoadIndex;
   readonly terrainHeight: TerrainHeight;
+  readonly districtMap: DistrictMap;
+  readonly landmarks: LandmarkDef[];
+  readonly poolManager: CityPoolManager;
+  readonly propsGenerator: CityPropsGenerator;
   readonly chunkManager: ChunkManager;
 
   readonly visualGroup = new THREE.Group();
+
+  // Local Chunk BVH Colliders Map
+  private readonly chunkColliders = new Map<string, ChunkCollider>();
+  private readonly bvhRaycaster = new THREE.Raycaster();
+  private readonly bvhHits: THREE.Intersection[] = [];
 
   // Atmosphere & Lighting
   readonly sunLight: THREE.DirectionalLight;
@@ -49,6 +66,7 @@ export class RoamWorld implements SurfaceProvider {
   ) {
     this.spec = spec;
     this.currentTheme = CITY_THEMES[0]; // High-noon vibrant daylight theme
+    this.bvhRaycaster.firstHitOnly = true;
 
     // 1. Atmosphere Lights (matching race mode style)
     this.sunLight = new THREE.DirectionalLight(this.currentTheme.sunColor, this.currentTheme.sunIntensity);
@@ -78,12 +96,36 @@ export class RoamWorld implements SurfaceProvider {
     // 3. Terrain Height Engine (analytic elevation + road flattening)
     this.terrainHeight = new TerrainHeight(this.spec, this.roadIndex);
 
+    // 4. District Map & Landmarks
+    this.districtMap = new DistrictMap(this.spec);
+    this.landmarks = createLandmarkDefs(this.spec.chunkSize);
+
+    // 5. Shared Global InstancedMesh Pools
+    this.poolManager = new CityPoolManager();
+    this.visualGroup.add(this.poolManager.rootGroup);
+
+    // 6. City Props Generator (Lots, Buildings, Trees, Lamps)
+    this.propsGenerator = new CityPropsGenerator(
+      this.spec,
+      this.roadIndex,
+      this.terrainHeight,
+      this.districtMap,
+      this.landmarks
+    );
+
     // Update spawn position to exact ground elevation
     const spawnGroundY = this.terrainHeight.groundHeightAt(ROAM_SPAWN_POS.x, ROAM_SPAWN_POS.z);
     ROAM_SPAWN_POS.y = spawnGroundY + 0.34;
 
-    // 4. Procedural Chunk Manager
-    this.chunkManager = new ChunkManager(this.spec, this.terrainHeight, this.roadIndex);
+    // 7. Procedural Chunk Manager
+    this.chunkManager = new ChunkManager(
+      this.spec,
+      this.terrainHeight,
+      this.roadIndex,
+      this.propsGenerator,
+      this.poolManager,
+      this
+    );
     this.visualGroup.add(this.chunkManager.rootGroup);
 
     // Pre-warm initial chunks around spawn
@@ -94,6 +136,14 @@ export class RoamWorld implements SurfaceProvider {
     }
   }
 
+  registerChunkCollider(collider: ChunkCollider): void {
+    this.chunkColliders.set(`${collider.cx}_${collider.cz}`, collider);
+  }
+
+  unregisterChunkCollider(cx: number, cz: number): void {
+    this.chunkColliders.delete(`${cx}_${cz}`);
+  }
+
   applyAtmosphere(renderer: THREE.WebGLRenderer): void {
     renderer.setClearColor(this.currentTheme.skyColor, 1);
   }
@@ -102,7 +152,8 @@ export class RoamWorld implements SurfaceProvider {
     scene.add(this.visualGroup);
     scene.add(this.sunLight);
     scene.add(this.hemiLight);
-    scene.fog = new THREE.FogExp2(this.currentTheme.fogColor, this.currentTheme.fogDensity);
+    // Tuned daylight fog: clear within 260m, smooth daylight haze to 620m (hides chunk streaming)
+    scene.fog = new THREE.Fog(this.currentTheme.fogColor, 260, 620);
   }
 
   removeFromScene(scene: THREE.Scene): void {
@@ -131,7 +182,7 @@ export class RoamWorld implements SurfaceProvider {
     return this.chunkManager.lastBuildMs;
   }
 
-  // ── SurfaceProvider Implementation (Zero Mesh BVH for Terrain) ──
+  // ── SurfaceProvider Implementation (Terrain + Local Chunk BVH) ──
 
   raycast(
     origin: THREE.Vector3,
@@ -141,28 +192,62 @@ export class RoamWorld implements SurfaceProvider {
   ): boolean {
     outHit.hit = false;
 
-    // Fast path: Downward ground probes (car suspension, surface sticking)
+    // 1. Check Local Chunk BVH Colliders (Solid Buildings, Walls, Landmarks)
+    let hitSolid = false;
+    let bestSolidDist = Infinity;
+
+    const chunkSize = this.spec.chunkSize;
+    const minCx = Math.floor((origin.x - maxDistance) / chunkSize);
+    const maxCx = Math.floor((origin.x + maxDistance) / chunkSize);
+    const minCz = Math.floor((origin.z - maxDistance) / chunkSize);
+    const maxCz = Math.floor((origin.z + maxDistance) / chunkSize);
+
+    this.bvhRaycaster.ray.origin.copy(origin);
+    this.bvhRaycaster.ray.direction.copy(direction).normalize();
+    this.bvhRaycaster.far = maxDistance;
+
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cz = minCz; cz <= maxCz; cz++) {
+        const collider = this.chunkColliders.get(`${cx}_${cz}`);
+        if (collider && collider.mesh) {
+          this.bvhHits.length = 0;
+          collider.mesh.raycast(this.bvhRaycaster, this.bvhHits);
+
+          if (this.bvhHits.length > 0 && this.bvhHits[0].distance < bestSolidDist) {
+            const h = this.bvhHits[0];
+            bestSolidDist = h.distance;
+            _scratchSolidPoint.copy(h.point);
+            if (h.face) {
+              _scratchSolidNormal.copy(h.face.normal);
+            } else {
+              _scratchSolidNormal.set(0, 1, 0);
+            }
+            hitSolid = true;
+          }
+        }
+      }
+    }
+
+    // 2. Check Ground Surface
+    let hitGround = false;
+    let groundDist = Infinity;
+    let groundPointY = 0;
+
+    // Downward ground probes (car suspension, surface sticking)
     if (direction.y < -0.05) {
       const h0 = this.terrainHeight.groundHeightAt(origin.x, origin.z);
       let t = (origin.y - h0) / (-direction.y);
 
       if (t >= 0 && t <= maxDistance) {
-        // Refine once for ground slope
         const x1 = origin.x + direction.x * t;
         const z1 = origin.z + direction.z * t;
         const h1 = this.terrainHeight.groundHeightAt(x1, z1);
         t = (origin.y - h1) / (-direction.y);
 
         if (t >= 0 && t <= maxDistance) {
-          outHit.hit = true;
-          outHit.distance = t;
-          outHit.point.set(
-            origin.x + direction.x * t,
-            h1,
-            origin.z + direction.z * t
-          );
-          this.terrainHeight.groundNormalAt(outHit.point.x, outHit.point.z, outHit.normal);
-          return true;
+          hitGround = true;
+          groundDist = t;
+          groundPointY = h1;
         }
       }
     } else {
@@ -173,7 +258,6 @@ export class RoamWorld implements SurfaceProvider {
       const endGround = this.terrainHeight.groundHeightAt(endX, endZ);
 
       if (endY < endGround) {
-        // Ray penetrates ground: find intersection via bisection
         let tLo = 0;
         let tHi = maxDistance;
         for (let iter = 0; iter < 4; iter++) {
@@ -188,16 +272,34 @@ export class RoamWorld implements SurfaceProvider {
             tLo = tMid;
           }
         }
-        outHit.hit = true;
-        outHit.distance = tHi;
-        outHit.point.set(
-          origin.x + direction.x * tHi,
-          origin.y + direction.y * tHi,
-          origin.z + direction.z * tHi
-        );
-        this.terrainHeight.groundNormalAt(outHit.point.x, outHit.point.z, outHit.normal);
-        return true;
+        hitGround = true;
+        groundDist = tHi;
+        groundPointY = origin.y + direction.y * tHi;
       }
+    }
+
+    // 3. Resolve closest hit between Solid Objects and Ground
+    if (hitSolid && (!hitGround || bestSolidDist <= groundDist)) {
+      outHit.hit = true;
+      outHit.distance = bestSolidDist;
+      outHit.point.copy(_scratchSolidPoint);
+      outHit.normal.copy(_scratchSolidNormal);
+      if (outHit.normal.dot(direction) > 0) {
+        outHit.normal.negate();
+      }
+      return true;
+    }
+
+    if (hitGround) {
+      outHit.hit = true;
+      outHit.distance = groundDist;
+      outHit.point.set(
+        origin.x + direction.x * groundDist,
+        groundPointY,
+        origin.z + direction.z * groundDist
+      );
+      this.terrainHeight.groundNormalAt(outHit.point.x, outHit.point.z, outHit.normal);
+      return true;
     }
 
     return false;
@@ -217,5 +319,7 @@ export class RoamWorld implements SurfaceProvider {
 
   dispose(): void {
     this.chunkManager.dispose();
+    this.poolManager.dispose();
+    this.chunkColliders.clear();
   }
 }

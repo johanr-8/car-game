@@ -16,3 +16,8 @@ export * from './WorldConfig';
 export * from './RoadNetwork';
 export * from './TerrainHeight';
 export * from './ChunkManager';
+export * from './DistrictMap';
+export * from './Landmarks';
+export * from './InstancedPool';
+export * from './ChunkCollider';
+export * from './CityPropsGenerator';

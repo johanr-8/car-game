@@ -20,6 +20,10 @@ import type { TerrainHeight } from './TerrainHeight';
 import type { SpatialRoadIndex } from './RoadNetwork';
 import { RoadClass } from './RoadNetwork';
 import { getAsphaltTexture, getGrassTexture } from './TextureGenerator';
+import { ChunkCollider } from './ChunkCollider';
+import type { CityPropsGenerator } from './CityPropsGenerator';
+import type { CityPoolManager, InstancedPool } from './InstancedPool';
+import type { RoamWorld } from './RoamWorld';
 
 // Cloned textures for Free Roam procedural terrain and roads
 const roamGrassTex = getGrassTexture().clone();
@@ -175,6 +179,13 @@ export class TerrainChunk {
   cz = 0;
   isActive = false;
 
+  collider: ChunkCollider | null = null;
+  landmarkGroup: THREE.Group | null = null;
+
+  readonly allocatedBuildingSlots: { pool: InstancedPool; slot: number }[] = [];
+  readonly allocatedTreeSlots: number[] = [];
+  readonly allocatedLampSlots: number[] = [];
+
   private readonly posAttr: THREE.BufferAttribute;
   private readonly normAttr: THREE.BufferAttribute;
   private readonly colAttr: THREE.BufferAttribute;
@@ -211,7 +222,10 @@ export class TerrainChunk {
     cz: number,
     terrainHeight: TerrainHeight,
     roadIndex: SpatialRoadIndex,
-    spec: WorldSpec
+    spec: WorldSpec,
+    propsGenerator?: CityPropsGenerator,
+    poolManager?: CityPoolManager,
+    roamWorld?: RoamWorld
   ): void {
     this.cx = cx;
     this.cz = cz;
@@ -303,6 +317,52 @@ export class TerrainChunk {
 
     // ── Build Draped Road Ribbons for this Chunk ──────────────
     this.buildRoadRibbons(cx, cz, terrainHeight, roadIndex, spec);
+
+    // ── Build City Props (Buildings, Trees, Street Lamps, Collider) ──
+    if (propsGenerator && poolManager && roamWorld) {
+      const props = propsGenerator.generateChunkProps(cx, cz);
+
+      // 1. Buildings (allocated from shared global InstancedMesh pools)
+      for (let i = 0; i < props.buildings.length; i++) {
+        const b = props.buildings[i];
+        const pool = poolManager.buildingPools[b.style];
+        const slot = pool.allocate();
+        if (slot >= 0) {
+          pool.setMatrix(slot, b.matrix);
+          this.allocatedBuildingSlots.push({ pool, slot });
+        }
+      }
+
+      // 2. Trees
+      for (let i = 0; i < props.treeMatrices.length; i++) {
+        const slot = poolManager.treePool.allocate();
+        if (slot >= 0) {
+          poolManager.treePool.setMatrix(slot, props.treeMatrices[i]);
+          this.allocatedTreeSlots.push(slot);
+        }
+      }
+
+      // 3. Street Lamps
+      for (let i = 0; i < props.lampMatrices.length; i++) {
+        const slot = poolManager.lampPool.allocate();
+        if (slot >= 0) {
+          poolManager.lampPool.setMatrix(slot, props.lampMatrices[i]);
+          this.allocatedLampSlots.push(slot);
+        }
+      }
+
+      // 4. Landmark Group
+      if (props.landmarkGroup) {
+        this.landmarkGroup = props.landmarkGroup;
+        this.group.add(this.landmarkGroup);
+      }
+
+      // 5. Local Chunk BVH Collider
+      if (props.solidBoxes.length > 0) {
+        this.collider = new ChunkCollider(cx, cz, props.solidBoxes);
+        roamWorld.registerChunkCollider(this.collider);
+      }
+    }
   }
 
   private buildRoadRibbons(
@@ -446,8 +506,43 @@ export class TerrainChunk {
     return geo;
   }
 
-  recycle(): void {
+  recycle(poolManager?: CityPoolManager, roamWorld?: RoamWorld): void {
     this.isActive = false;
+
+    // Release building slots back to pools
+    for (let i = 0; i < this.allocatedBuildingSlots.length; i++) {
+      const e = this.allocatedBuildingSlots[i];
+      e.pool.free(e.slot);
+    }
+    this.allocatedBuildingSlots.length = 0;
+
+    // Release tree and lamp slots
+    if (poolManager) {
+      for (let i = 0; i < this.allocatedTreeSlots.length; i++) {
+        poolManager.treePool.free(this.allocatedTreeSlots[i]);
+      }
+      for (let i = 0; i < this.allocatedLampSlots.length; i++) {
+        poolManager.lampPool.free(this.allocatedLampSlots[i]);
+      }
+    }
+    this.allocatedTreeSlots.length = 0;
+    this.allocatedLampSlots.length = 0;
+
+    // Remove landmark visual mesh
+    if (this.landmarkGroup) {
+      this.group.remove(this.landmarkGroup);
+      this.landmarkGroup = null;
+    }
+
+    // Unregister and dispose local chunk BVH collider
+    if (this.collider) {
+      if (roamWorld) {
+        roamWorld.unregisterChunkCollider(this.cx, this.cz);
+      }
+      this.collider.dispose();
+      this.collider = null;
+    }
+
     while (this.roadGroup.children.length > 0) {
       const child = this.roadGroup.children[0] as THREE.Mesh;
       this.roadGroup.remove(child);
@@ -470,6 +565,9 @@ export class ChunkManager {
   private readonly spec: WorldSpec;
   private readonly terrainHeight: TerrainHeight;
   private readonly roadIndex: SpatialRoadIndex;
+  private readonly propsGenerator?: CityPropsGenerator;
+  private readonly poolManager?: CityPoolManager;
+  private readonly roamWorld?: RoamWorld;
 
   private readonly loadedChunks = new Map<string, TerrainChunk>();
   private readonly chunkPool: TerrainChunk[] = [];
@@ -483,11 +581,17 @@ export class ChunkManager {
   constructor(
     spec: WorldSpec,
     terrainHeight: TerrainHeight,
-    roadIndex: SpatialRoadIndex
+    roadIndex: SpatialRoadIndex,
+    propsGenerator?: CityPropsGenerator,
+    poolManager?: CityPoolManager,
+    roamWorld?: RoamWorld
   ) {
     this.spec = spec;
     this.terrainHeight = terrainHeight;
     this.roadIndex = roadIndex;
+    this.propsGenerator = propsGenerator;
+    this.poolManager = poolManager;
+    this.roamWorld = roamWorld;
 
     // Pre-populate chunk pool (avoids allocations during gameplay)
     const initialPoolSize = 64;
@@ -568,7 +672,16 @@ export class ChunkManager {
 
         // Get chunk from pool or instantiate if pool empty
         const chunk = this.chunkPool.length > 0 ? this.chunkPool.pop()! : new TerrainChunk();
-        chunk.build(item.cx, item.cz, this.terrainHeight, this.roadIndex, this.spec);
+        chunk.build(
+          item.cx,
+          item.cz,
+          this.terrainHeight,
+          this.roadIndex,
+          this.spec,
+          this.propsGenerator,
+          this.poolManager,
+          this.roamWorld
+        );
 
         this.loadedChunks.set(key, chunk);
         this.rootGroup.add(chunk.group);
@@ -578,12 +691,16 @@ export class ChunkManager {
     } else {
       this.lastBuildMs = 0;
     }
+
+    if (this.poolManager) {
+      this.poolManager.commitAll();
+    }
   }
 
   private unloadChunk(key: string, chunk: TerrainChunk): void {
     this.loadedChunks.delete(key);
     this.rootGroup.remove(chunk.group);
-    chunk.recycle();
+    chunk.recycle(this.poolManager, this.roamWorld);
     this.chunkPool.push(chunk);
   }
 
@@ -606,7 +723,16 @@ export class ChunkManager {
 
           if (!this.loadedChunks.has(key)) {
             const chunk = this.chunkPool.length > 0 ? this.chunkPool.pop()! : new TerrainChunk();
-            chunk.build(cx, cz, this.terrainHeight, this.roadIndex, this.spec);
+            chunk.build(
+              cx,
+              cz,
+              this.terrainHeight,
+              this.roadIndex,
+              this.spec,
+              this.propsGenerator,
+              this.poolManager,
+              this.roamWorld
+            );
             this.loadedChunks.set(key, chunk);
             this.rootGroup.add(chunk.group);
           }
@@ -618,6 +744,10 @@ export class ChunkManager {
     this.lastPlayerCz = playerCz;
     this.buildQueue.length = 0;
     this.queuedSet.clear();
+
+    if (this.poolManager) {
+      this.poolManager.commitAll();
+    }
   }
 
   dispose(): void {

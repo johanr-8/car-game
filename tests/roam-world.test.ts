@@ -18,6 +18,10 @@ import { ArcadeCarController } from '../src/car/ArcadeCarController';
 import { FIXED_DT } from '../src/core/constants';
 import type { InputState } from '../src/core/InputManager';
 import { RoamWorld } from '../src/world/RoamWorld';
+import { DistrictMap, DistrictType, BuildingStyle } from '../src/world/DistrictMap';
+import { CityPropsGenerator } from '../src/world/CityPropsGenerator';
+import { CityPoolManager, InstancedPool } from '../src/world/InstancedPool';
+import { createLandmarkDefs } from '../src/world/Landmarks';
 
 describe('Free Roam: Road Network Generator', () => {
   it('generates a deterministic, serializable road graph with ring highway, diagonal highways, avenues, and local streets', () => {
@@ -342,5 +346,184 @@ describe('Free Roam: Chunk Streaming & Budgeting', () => {
     expect(stripeMat.polygonOffset).toBe(true);
 
     chunk.recycle();
+  });
+});
+
+describe('Free Roam: Districts, City Props & Instanced Pools', () => {
+  it('classifies districts deterministically with Downtown near the center and one open green reserve', () => {
+    const distMap = new DistrictMap(DEFAULT_WORLD_SPEC);
+
+    // Center is Downtown
+    expect(distMap.getDistrictAt(0, 0)).toBe(DistrictType.DOWNTOWN);
+    expect(distMap.getDistrictAt(100, -100)).toBe(DistrictType.DOWNTOWN);
+
+    // Northwest far expanse is OPEN_GREEN
+    expect(distMap.getDistrictAt(-800, -800)).toBe(DistrictType.OPEN_GREEN);
+
+    // Determinism test: identical queries yield identical districts
+    const distMap2 = new DistrictMap(DEFAULT_WORLD_SPEC);
+    for (let x = -1000; x <= 1000; x += 250) {
+      for (let z = -1000; z <= 1000; z += 250) {
+        expect(distMap.getDistrictAt(x, z)).toBe(distMap2.getDistrictAt(x, z));
+      }
+    }
+  });
+
+  it('guarantees building lots NEVER overlap roads across all districts', () => {
+    const graph = generateRoadNetwork(DEFAULT_WORLD_SPEC);
+    const roadIndex = new SpatialRoadIndex(graph, DEFAULT_WORLD_SPEC.chunkSize);
+    const terrain = new TerrainHeight(DEFAULT_WORLD_SPEC, roadIndex);
+    const districtMap = new DistrictMap(DEFAULT_WORLD_SPEC);
+    const landmarks = createLandmarkDefs(DEFAULT_WORLD_SPEC.chunkSize);
+    const generator = new CityPropsGenerator(DEFAULT_WORLD_SPEC, roadIndex, terrain, districtMap, landmarks);
+
+    // Sample 25 chunks across different quadrants and districts
+    let totalBuildingsChecked = 0;
+    for (let cx = -2; cx <= 2; cx++) {
+      for (let cz = -2; cz <= 2; cz++) {
+        const props = generator.generateChunkProps(cx, cz);
+        for (const b of props.buildings) {
+          totalBuildingsChecked++;
+          const nearest = roadIndex.getNearestRoad(b.box.x, b.box.z, 64);
+          expect(nearest).toBeDefined();
+
+          // Distance from lot center to road centerline must exceed road half-width + lot radius
+          const lotRadius = Math.hypot(b.box.width * 0.5, b.box.depth * 0.5);
+          expect(nearest!.distance).toBeGreaterThanOrEqual(nearest!.roadHalfWidth + lotRadius);
+        }
+      }
+    }
+    expect(totalBuildingsChecked).toBeGreaterThan(30);
+  });
+
+  it('guarantees identical seed generates the exact same city lots and props', () => {
+    const graph = generateRoadNetwork(DEFAULT_WORLD_SPEC);
+    const roadIndex = new SpatialRoadIndex(graph, DEFAULT_WORLD_SPEC.chunkSize);
+    const terrain = new TerrainHeight(DEFAULT_WORLD_SPEC, roadIndex);
+    const districtMap = new DistrictMap(DEFAULT_WORLD_SPEC);
+    const landmarks = createLandmarkDefs(DEFAULT_WORLD_SPEC.chunkSize);
+
+    const gen1 = new CityPropsGenerator(DEFAULT_WORLD_SPEC, roadIndex, terrain, districtMap, landmarks);
+    const gen2 = new CityPropsGenerator(DEFAULT_WORLD_SPEC, roadIndex, terrain, districtMap, landmarks);
+
+    const p1 = gen1.generateChunkProps(0, 0);
+    const p2 = gen2.generateChunkProps(0, 0);
+
+    expect(p1.buildings.length).toBe(p2.buildings.length);
+    expect(p1.treeMatrices.length).toBe(p2.treeMatrices.length);
+    expect(p1.lampMatrices.length).toBe(p2.lampMatrices.length);
+
+    for (let i = 0; i < p1.buildings.length; i++) {
+      expect(p1.buildings[i].style).toBe(p2.buildings[i].style);
+      expect(p1.buildings[i].box.x).toBeCloseTo(p2.buildings[i].box.x, 3);
+      expect(p1.buildings[i].box.y).toBeCloseTo(p2.buildings[i].box.y, 3);
+      expect(p1.buildings[i].box.z).toBeCloseTo(p2.buildings[i].box.z, 3);
+      expect(p1.buildings[i].box.width).toBe(p2.buildings[i].box.width);
+      expect(p1.buildings[i].box.height).toBe(p2.buildings[i].box.height);
+    }
+  });
+
+  it('chunk unload releases all pool slots with zero leaks after loading and unloading 100 chunks', () => {
+    const roam = new RoamWorld();
+
+    const poolManager = roam.poolManager;
+    // Check initial capacities
+    expect(CityPoolManager.BUILDING_CAPACITY).toBe(500);
+    expect(CityPoolManager.TREE_CAPACITY).toBe(2500);
+    expect(CityPoolManager.LAMP_CAPACITY).toBe(1500);
+
+    // Initial state: warmUp loaded spawn chunks
+    expect(roam.loadedChunksCount).toBeGreaterThan(60);
+    const midTreeAllocated = poolManager.treePool.allocatedCount;
+    expect(midTreeAllocated).toBeGreaterThan(0);
+
+    // Stream across 100 chunk positions to trigger rolling loads and unloads
+    for (let i = 0; i < 100; i++) {
+      roam.updateVisuals((i % 10) * 128, Math.floor(i / 10) * 128);
+    }
+
+    // Now unload all chunks via dispose
+    roam.dispose();
+    expect(roam.loadedChunksCount).toBe(0);
+
+    // Every single slot in all 8 pools MUST be completely returned
+    for (const style of Object.values(BuildingStyle)) {
+      const pool = poolManager.buildingPools[style];
+      expect(pool.allocatedCount).toBe(0);
+      expect(pool.availableCount).toBe(pool.capacity);
+    }
+    expect(poolManager.treePool.allocatedCount).toBe(0);
+    expect(poolManager.treePool.availableCount).toBe(poolManager.treePool.capacity);
+
+    expect(poolManager.lampPool.allocatedCount).toBe(0);
+    expect(poolManager.lampPool.availableCount).toBe(poolManager.lampPool.capacity);
+  });
+
+  it('safely handles pool capacity limit: logs warning once and skips without crashing', () => {
+    const pool = new InstancedPool(
+      'Test_Mini_Pool',
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial(),
+      4
+    );
+
+    expect(pool.capacity).toBe(4);
+    expect(pool.allocate()).toBe(3);
+    expect(pool.allocate()).toBe(2);
+    expect(pool.allocate()).toBe(1);
+    expect(pool.allocate()).toBe(0);
+
+    // Next allocate exceeds capacity: must return -1 and NOT throw
+    expect(pool.allocate()).toBe(-1);
+    expect(pool.allocate()).toBe(-1);
+    expect(pool.allocatedCount).toBe(4);
+    expect(pool.availableCount).toBe(0);
+
+    // Freeing 1 slot allows re-allocation
+    pool.free(2);
+    expect(pool.availableCount).toBe(1);
+    expect(pool.allocate()).toBe(2);
+
+    pool.dispose();
+  });
+
+  it('detects solid building walls via SurfaceProvider with vertical deflection normal', () => {
+    const roam = new RoamWorld();
+    roam.chunkManager.warmUp(0, 0); // Warm up Downtown chunks around (0, 0)
+
+    // Find a chunk with a building around (0, 0)
+    let targetBuilding: any = null;
+    let targetChunkX = 0;
+    let targetChunkZ = 0;
+    for (let cx = -1; cx <= 1 && !targetBuilding; cx++) {
+      for (let cz = -1; cz <= 1 && !targetBuilding; cz++) {
+        const props = roam.propsGenerator.generateChunkProps(cx, cz);
+        if (props.buildings.length > 0) {
+          targetBuilding = props.buildings[0];
+          targetChunkX = cx;
+          targetChunkZ = cz;
+        }
+      }
+    }
+    expect(targetBuilding).toBeDefined();
+
+    // Verify chunk collider is registered
+    expect((roam as any).chunkColliders.has(`${targetChunkX}_${targetChunkZ}`)).toBe(true);
+
+    // Probe towards the building wall
+    const box = targetBuilding.box;
+    const probeOrigin = new THREE.Vector3(box.x + box.width * 0.5 + 2.0, box.y, box.z);
+    const probeDir = new THREE.Vector3(-1, 0, 0); // pointing at building wall
+    const hit: any = { hit: false, distance: 0, point: new THREE.Vector3(), normal: new THREE.Vector3() };
+
+    const hasHit = roam.raycast(probeOrigin, probeDir, 5.0, hit);
+    expect(hasHit).toBe(true);
+    expect(hit.hit).toBe(true);
+    expect(hit.distance).toBeLessThan(3.0);
+    // Wall normal must be vertical wall facing outward (+X)
+    expect(hit.normal.x).toBeGreaterThan(0.7);
+    expect(Math.abs(hit.normal.y)).toBeLessThan(0.15); // NOT ground (vertical wall)
+
+    roam.dispose();
   });
 });
