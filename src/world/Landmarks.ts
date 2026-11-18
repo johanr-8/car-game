@@ -758,5 +758,131 @@ export function createLandmarkDefs(chunkSize: number): LandmarkDef[] {
         ];
       },
     },
+
+    // ── 9. Metropolis Express Viaduct Flyover & Underpass ─────
+    {
+      id: 'landmark_skyway_flyover',
+      name: 'Metropolis Express Viaduct Flyover',
+      x: 160,
+      z: 160,
+      chunkX: Math.floor(160 / chunkSize),
+      chunkZ: Math.floor(160 / chunkSize),
+
+      createMesh(terrainHeight: TerrainHeight): THREE.Group {
+        const group = new THREE.Group();
+        const baseH = terrainHeight.groundHeightAt(160, 160);
+
+        const concreteMat = new THREE.MeshStandardMaterial({
+          color: 0x64748b,
+          roughness: 0.85,
+          metalness: 0.15,
+        });
+        const asphaltMat = new THREE.MeshStandardMaterial({
+          color: 0x1e293b,
+          roughness: 0.80,
+          metalness: 0.10,
+        });
+        const barrierMat = new THREE.MeshStandardMaterial({
+          color: 0x94a3b8,
+          roughness: 0.60,
+          metalness: 0.20,
+        });
+        const cautionMat = new THREE.MeshStandardMaterial({
+          color: 0xfacc15,
+          roughness: 0.40,
+          metalness: 0.50,
+        });
+
+        // 1. Elevated Highway Deck (96m long along Z, 14m wide along X, at elevation +8.5m)
+        const flyoverElevation = baseH + 8.5;
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(14.0, 1.2, 96.0), asphaltMat);
+        deck.position.set(160, flyoverElevation, 160);
+        deck.castShadow = true;
+        deck.receiveShadow = true;
+        group.add(deck);
+
+        // 2. Concrete New Jersey Safety Crash Barriers along deck edges
+        for (const side of [-1, 1]) {
+          const xPos = 160 + side * 6.8;
+          const barrier = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 96.0), barrierMat);
+          barrier.position.set(xPos, flyoverElevation + 1.0, 160);
+          barrier.castShadow = true;
+          group.add(barrier);
+        }
+
+        // 3. Concrete Support Portal Bents (underpass clearance)
+        for (const zOffset of [-24, 24]) {
+          const zPos = 160 + zOffset;
+          // Left column
+          const colL = new THREE.Mesh(new THREE.BoxGeometry(1.8, 8.5, 1.8), concreteMat);
+          colL.position.set(160 - 5.5, baseH + 4.25, zPos);
+          colL.castShadow = true;
+          group.add(colL);
+
+          // Right column
+          const colR = new THREE.Mesh(new THREE.BoxGeometry(1.8, 8.5, 1.8), concreteMat);
+          colR.position.set(160 + 5.5, baseH + 4.25, zPos);
+          colR.castShadow = true;
+          group.add(colR);
+
+          // Crosshead cap beam
+          const crosshead = new THREE.Mesh(new THREE.BoxGeometry(14.0, 1.4, 2.2), concreteMat);
+          crosshead.position.set(160, flyoverElevation - 0.7, zPos);
+          crosshead.castShadow = true;
+          group.add(crosshead);
+
+          // Caution clearance stripe
+          const warnBand = new THREE.Mesh(new THREE.BoxGeometry(9.0, 0.35, 2.25), cautionMat);
+          warnBand.position.set(160, flyoverElevation - 1.2, zPos);
+          group.add(warnBand);
+        }
+
+        // 4. North & South Approach Ramps (slope connecting ground to flyover deck)
+        const rampLen = 32.0;
+        const rampAngle = Math.atan2(8.5, rampLen);
+
+        const rampN = new THREE.Mesh(new THREE.BoxGeometry(14.0, 1.0, rampLen), asphaltMat);
+        rampN.rotation.x = -rampAngle;
+        rampN.position.set(160, baseH + 4.25, 160 - 48 - rampLen * 0.5);
+        rampN.castShadow = true;
+        rampN.receiveShadow = true;
+        group.add(rampN);
+
+        const rampS = new THREE.Mesh(new THREE.BoxGeometry(14.0, 1.0, rampLen), asphaltMat);
+        rampS.rotation.x = rampAngle;
+        rampS.position.set(160, baseH + 4.25, 160 + 48 + rampLen * 0.5);
+        rampS.castShadow = true;
+        rampS.receiveShadow = true;
+        group.add(rampS);
+
+        return group;
+      },
+
+      getSolidBoxes(terrainHeight: TerrainHeight): SolidBox[] {
+        const baseH = terrainHeight.groundHeightAt(160, 160);
+        const flyoverElevation = baseH + 8.5;
+        const rampLen = 32.0;
+        const rampAngle = Math.atan2(8.5, rampLen);
+
+        return [
+          // Main elevated viaduct deck
+          { x: 160, y: flyoverElevation, z: 160, width: 14.0, height: 1.2, depth: 96.0 },
+
+          // Concrete Barriers
+          { x: 160 - 6.8, y: flyoverElevation + 1.0, z: 160, width: 0.5, height: 0.9, depth: 96.0 },
+          { x: 160 + 6.8, y: flyoverElevation + 1.0, z: 160, width: 0.5, height: 0.9, depth: 96.0 },
+
+          // Support Pier Columns
+          { x: 160 - 5.5, y: baseH + 4.25, z: 136, width: 1.8, height: 8.5, depth: 1.8 },
+          { x: 160 + 5.5, y: baseH + 4.25, z: 136, width: 1.8, height: 8.5, depth: 1.8 },
+          { x: 160 - 5.5, y: baseH + 4.25, z: 184, width: 1.8, height: 8.5, depth: 1.8 },
+          { x: 160 + 5.5, y: baseH + 4.25, z: 184, width: 1.8, height: 8.5, depth: 1.8 },
+
+          // Approach Ramps
+          { x: 160, y: baseH + 4.25, z: 160 - 48 - rampLen * 0.5, width: 14.0, height: 1.0, depth: rampLen, rotationX: -rampAngle },
+          { x: 160, y: baseH + 4.25, z: 160 + 48 + rampLen * 0.5, width: 14.0, height: 1.0, depth: rampLen, rotationX: rampAngle },
+        ];
+      },
+    },
   ];
 }

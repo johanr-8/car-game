@@ -332,11 +332,11 @@ describe('Free Roam Fixes & Spectator Fly Mode', () => {
       roamWorld.dispose();
     });
 
-    it('generates all 8 hero landmarks with solid colliders including drift garage, storm canal, skidpad, observatory, and bay bridge', () => {
+    it('generates all 9 hero landmarks with solid colliders including drift garage, storm canal, skidpad, observatory, bay bridge, and flyover', () => {
       const roamWorld = new RoamWorld();
       const lm = roamWorld.landmarks;
 
-      expect(lm.length).toBe(8);
+      expect(lm.length).toBe(9);
 
       const driftGarage = lm.find(l => l.id === 'landmark_drift_garage');
       expect(driftGarage).toBeDefined();
@@ -348,6 +348,8 @@ describe('Free Roam Fixes & Spectator Fly Mode', () => {
       expect(obs).toBeDefined();
       const bridge = lm.find(l => l.id === 'landmark_bay_bridge');
       expect(bridge).toBeDefined();
+      const flyover = lm.find(l => l.id === 'landmark_skyway_flyover');
+      expect(flyover).toBeDefined();
 
       for (const landmark of lm) {
         const mesh = landmark.createMesh(roamWorld.terrainHeight);
@@ -356,6 +358,61 @@ describe('Free Roam Fixes & Spectator Fly Mode', () => {
         expect(solidBoxes.length).toBeGreaterThan(0);
       }
       roamWorld.dispose();
+    });
+
+    it('generates traffic signals at intersections and entrance canopies on urban buildings', () => {
+      const roamWorld = new RoamWorld();
+      const generator = roamWorld.propsGenerator;
+
+      let totalSignals = 0;
+      let totalCanopies = 0;
+      let totalParkingStalls = 0;
+      let totalFences = 0;
+
+      for (let cx = -2; cx <= 2; cx++) {
+        for (let cz = -2; cz <= 2; cz++) {
+          const props = generator.generateChunkProps(cx, cz);
+          totalSignals += props.trafficSignalMatrices.length;
+          totalCanopies += props.canopyMatrices.length;
+          totalParkingStalls += props.parkingStallMatrices.length;
+          totalFences += props.fenceMatrices.length;
+        }
+      }
+
+      // Urban core must generate signals, canopies, and parking stalls
+      expect(totalSignals).toBeGreaterThan(0);
+      expect(totalCanopies).toBeGreaterThan(0);
+      expect(totalParkingStalls).toBeGreaterThan(0);
+
+      roamWorld.dispose();
+    });
+
+    it('pools traffic signals, canopies, parking stalls, and fences with zero allocation in CityPoolManager', () => {
+      const poolManager = new CityPoolManager();
+
+      expect(poolManager.trafficSignalPool).toBeDefined();
+      expect(poolManager.canopyPool).toBeDefined();
+      expect(poolManager.parkingStallPool).toBeDefined();
+      expect(poolManager.fencePool).toBeDefined();
+
+      // Verify slot allocation & release
+      const s1 = poolManager.trafficSignalPool.allocate();
+      expect(s1).toBeGreaterThanOrEqual(0);
+      poolManager.trafficSignalPool.free(s1);
+
+      const c1 = poolManager.canopyPool.allocate();
+      expect(c1).toBeGreaterThanOrEqual(0);
+      poolManager.canopyPool.free(c1);
+
+      const p1 = poolManager.parkingStallPool.allocate();
+      expect(p1).toBeGreaterThanOrEqual(0);
+      poolManager.parkingStallPool.free(p1);
+
+      const f1 = poolManager.fencePool.allocate();
+      expect(f1).toBeGreaterThanOrEqual(0);
+      poolManager.fencePool.free(f1);
+
+      poolManager.dispose();
     });
   });
 });

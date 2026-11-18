@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import type { WorldSpec } from './WorldConfig';
 import { BiomeType } from './WorldConfig';
-import type { SpatialRoadIndex } from './RoadNetwork';
+import type { SpatialRoadIndex, RoadEdge } from './RoadNetwork';
 import { RoadClass } from './RoadNetwork';
 import type { TerrainHeight } from './TerrainHeight';
 import type { DistrictMap, DistrictConfig } from './DistrictMap';
@@ -38,6 +38,10 @@ export interface GeneratedProps {
   gantryMatrices: THREE.Matrix4[];
   bollardMatrices: THREE.Matrix4[];
   antennaMatrices: THREE.Matrix4[];
+  trafficSignalMatrices: THREE.Matrix4[];
+  canopyMatrices: THREE.Matrix4[];
+  parkingStallMatrices: THREE.Matrix4[];
+  fenceMatrices: THREE.Matrix4[];
   solidBoxes: SolidBox[];
   landmarkGroup?: THREE.Group;
 }
@@ -110,6 +114,10 @@ export class CityPropsGenerator {
     const gantryMatrices: THREE.Matrix4[] = [];
     const bollardMatrices: THREE.Matrix4[] = [];
     const antennaMatrices: THREE.Matrix4[] = [];
+    const trafficSignalMatrices: THREE.Matrix4[] = [];
+    const canopyMatrices: THREE.Matrix4[] = [];
+    const parkingStallMatrices: THREE.Matrix4[] = [];
+    const fenceMatrices: THREE.Matrix4[] = [];
     const solidBoxes: SolidBox[] = [];
 
     // ── 1. Check for Landmark in this Chunk ────────────────────
@@ -123,9 +131,21 @@ export class CityPropsGenerator {
       }
     }
 
-    // ── 2. Building Lots Generation ───────────────────────────
+    // ── 2. Building Lots, Canopies & Parking Lots ─────────────
     if (district.hasBuildings && district.styles.length > 0) {
-      this.generateLots(cx, cz, district, rng, buildings, solidBoxes, billboardMatrices, antennaMatrices, landmark);
+      this.generateLots(
+        cx,
+        cz,
+        district,
+        rng,
+        buildings,
+        solidBoxes,
+        billboardMatrices,
+        antennaMatrices,
+        canopyMatrices,
+        parkingStallMatrices,
+        landmark
+      );
     }
 
     // ── 3. Trees Generation ───────────────────────────────────
@@ -140,6 +160,12 @@ export class CityPropsGenerator {
     // ── 6. Cyberpunk Street Bollards Generation ───────────────
     this.generateStreetBollards(cx, cz, district, bollardMatrices);
 
+    // ── 7. Traffic Signals at Intersections ───────────────────
+    this.generateTrafficSignals(cx, cz, trafficSignalMatrices);
+
+    // ── 8. Boundary Fences ────────────────────────────────────
+    this.generateFences(cx, cz, district, rng, buildings, fenceMatrices);
+
     return {
       buildings,
       treeMatrices,
@@ -148,6 +174,10 @@ export class CityPropsGenerator {
       gantryMatrices,
       bollardMatrices,
       antennaMatrices,
+      trafficSignalMatrices,
+      canopyMatrices,
+      parkingStallMatrices,
+      fenceMatrices,
       solidBoxes,
       landmarkGroup,
     };
@@ -162,6 +192,8 @@ export class CityPropsGenerator {
     outSolidBoxes: SolidBox[],
     outBillboards: { poolIndex: number; matrix: THREE.Matrix4 }[],
     outAntennas: THREE.Matrix4[],
+    outCanopies: THREE.Matrix4[],
+    outParkingStalls: THREE.Matrix4[],
     landmark?: LandmarkDef
   ): void {
     const chunkSize = this.spec.chunkSize;
@@ -290,6 +322,37 @@ export class CityPropsGenerator {
       }
       if (overlapsExisting) continue;
 
+      // Realistic Urban Element: Surface Parking Lots in Downtown & Midrise districts
+      const isCommercial = isDowntown || district.type === DistrictType.MIDRISE;
+      if (isCommercial && rng.next() < 0.20 && width >= 12 && depth >= 12 && outBuildings.length >= 1) {
+        const pGroundY = this.terrainHeight.groundHeightAt(lotX, lotZ);
+        if (pGroundY > 1.0) {
+          const dx = nearest.projectedX - lotX;
+          const dz = nearest.projectedZ - lotZ;
+          const rotY = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? Math.PI * 0.5 : -Math.PI * 0.5) : (dz > 0 ? 0 : Math.PI);
+          const fwdX = Math.sin(rotY);
+          const fwdZ = Math.cos(rotY);
+          const rightX = Math.cos(rotY);
+          const rightZ = -Math.sin(rotY);
+
+          // 2 rows of parking stalls facing the central access aisle
+          for (let row = -1; row <= 1; row += 2) {
+            const rowRotY = row === 1 ? rotY : rotY + Math.PI;
+            const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rowRotY);
+            for (let s = -1; s <= 1; s++) {
+              const sX = lotX + rightX * (s * 2.8) + fwdX * (row * 3.8);
+              const sZ = lotZ + rightZ * (s * 2.8) + fwdZ * (row * 3.8);
+              const sY = this.terrainHeight.groundHeightAt(sX, sZ) + 0.02;
+
+              const sMat = new THREE.Matrix4();
+              sMat.compose(new THREE.Vector3(sX, sY, sZ), q, new THREE.Vector3(1, 1, 1));
+              outParkingStalls.push(sMat);
+            }
+          }
+          continue;
+        }
+      }
+
       // Building Height & Style
       const height = Math.round(rng.range(district.minHeight, district.maxHeight));
       const style = rng.choice(district.styles);
@@ -323,6 +386,17 @@ export class CityPropsGenerator {
 
         outBuildings.push({ style, matrix: mat, box });
         outSolidBoxes.push(box);
+
+        // Realistic Entrance Canopy & Porch Portal (Apartments, Offices, High-rises)
+        if (height >= 10 && width >= 10) {
+          const frontX = lotX + Math.sin(rotY) * (depth * 0.5);
+          const frontZ = lotZ + Math.cos(rotY) * (depth * 0.5);
+          const canopyY = this.terrainHeight.groundHeightAt(frontX, frontZ);
+
+          const canopyMat = new THREE.Matrix4();
+          canopyMat.compose(new THREE.Vector3(frontX, canopyY, frontZ), quat, new THREE.Vector3(1, 1, 1));
+          outCanopies.push(canopyMat);
+        }
 
         // Cyberpunk Rooftop Neon Billboards (Commercial & Downtown high-rises)
         if (height >= 30 && rng.next() > 0.35) {
@@ -580,6 +654,152 @@ export class CityPropsGenerator {
           mat.compose(new THREE.Vector3(bX, bY, bZ), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
           outBollardMatrices.push(mat);
         }
+      }
+    }
+  }
+
+  private generateTrafficSignals(
+    cx: number,
+    cz: number,
+    outSignals: THREE.Matrix4[]
+  ): void {
+    const chunkSize = this.spec.chunkSize;
+    const minChunkX = cx * chunkSize;
+    const maxChunkX = (cx + 1) * chunkSize;
+    const minChunkZ = cz * chunkSize;
+    const maxChunkZ = (cz + 1) * chunkSize;
+
+    const graph = this.roadIndex.graph;
+    const nodes = graph.nodes;
+    const nodeCount = nodes.length;
+
+    for (let nid = 0; nid < nodeCount; nid++) {
+      const node = nodes[nid];
+      if (node.x < minChunkX || node.x >= maxChunkX || node.z < minChunkZ || node.z >= maxChunkZ) {
+        continue;
+      }
+
+      // Check node degree (number of connected edges)
+      const incidentEdges: RoadEdge[] = [];
+      for (let e = 0; e < graph.edges.length; e++) {
+        const edge = graph.edges[e];
+        if (edge.fromNodeId === nid || edge.toNodeId === nid) {
+          incidentEdges.push(edge);
+        }
+      }
+
+      // Only install traffic signals at 3-way or 4-way intersections
+      if (incidentEdges.length < 3) continue;
+
+      // Don't install in pure mountain / dirt trails
+      let hasUrbanRoad = false;
+      for (let i = 0; i < incidentEdges.length; i++) {
+        if (incidentEdges[i].roadClass !== RoadClass.MOUNTAIN && incidentEdges[i].roadClass !== RoadClass.DIRT) {
+          hasUrbanRoad = true;
+          break;
+        }
+      }
+      if (!hasUrbanRoad) continue;
+
+      // Place a traffic signal mast arm on corner approaches
+      for (let i = 0; i < incidentEdges.length; i++) {
+        const edge = incidentEdges[i];
+        const isFrom = edge.fromNodeId === nid;
+        const otherNode = nodes[isFrom ? edge.toNodeId : edge.fromNodeId];
+
+        // Direction FROM otherNode TO intersection node
+        const dx = node.x - otherNode.x;
+        const dz = node.z - otherNode.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 12.0) continue;
+
+        const dirX = dx / dist;
+        const dirZ = dz / dist;
+        // Right side perpendicular: when facing along dir, right is (dirZ, -dirX)
+        const perpRx = dirZ;
+        const perpRz = -dirX;
+
+        const halfW = edge.width * 0.5;
+        // Place signal mast on the right sidewalk just before stop line
+        const setback = Math.min(10.0, dist * 0.25);
+        const sigX = node.x - dirX * setback + perpRx * (halfW + 1.8);
+        const sigZ = node.z - dirZ * setback + perpRz * (halfW + 1.8);
+
+        // Ground height
+        const sigY = this.terrainHeight.groundHeightAt(sigX, sigZ);
+        if (sigY <= 1.0) continue;
+
+        // Facing oncoming traffic: direction opposite to dir
+        const rotY = Math.atan2(-dirX, -dirZ);
+
+        const mat = new THREE.Matrix4();
+        const pos = new THREE.Vector3(sigX, sigY, sigZ);
+        const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+        mat.compose(pos, quat, new THREE.Vector3(1, 1, 1));
+        outSignals.push(mat);
+      }
+    }
+  }
+
+  private generateFences(
+    cx: number,
+    cz: number,
+    district: DistrictConfig,
+    rng: ChunkRNG,
+    buildings: GeneratedBuilding[],
+    outFences: THREE.Matrix4[]
+  ): void {
+    if (district.type !== DistrictType.SUBURBAN && district.type !== DistrictType.INDUSTRIAL) {
+      return;
+    }
+
+    const chunkSize = this.spec.chunkSize;
+    const minChunkX = cx * chunkSize;
+    const maxChunkX = (cx + 1) * chunkSize;
+    const minChunkZ = cz * chunkSize;
+    const maxChunkZ = (cz + 1) * chunkSize;
+
+    for (let b = 0; b < buildings.length; b++) {
+      const box = buildings[b].box;
+      // 50% chance of perimeter fence per property
+      if (rng.next() < 0.45) continue;
+
+      const rotY = box.rotationY ?? 0;
+      // Backward vector (away from street)
+      const backX = -Math.sin(rotY);
+      const backZ = -Math.cos(rotY);
+      // Side vector (perpendicular)
+      const sideX = Math.cos(rotY);
+      const sideZ = -Math.sin(rotY);
+
+      const halfD = box.depth * 0.5;
+      const rearDist = halfD + 3.5;
+
+      // Rear boundary fence: 3 panels (each 3.5m wide)
+      const panelCount = 3;
+      const startOffset = -((panelCount - 1) * 3.5) * 0.5;
+
+      for (let p = 0; p < panelCount; p++) {
+        const lateral = startOffset + p * 3.5;
+        const fX = box.x + backX * rearDist + sideX * lateral;
+        const fZ = box.z + backZ * rearDist + sideZ * lateral;
+
+        if (fX < minChunkX || fX >= maxChunkX || fZ < minChunkZ || fZ >= maxChunkZ) continue;
+
+        // Verify terrain slope and height
+        const fY = this.terrainHeight.groundHeightAt(fX, fZ);
+        if (fY <= 1.0) continue;
+
+        // Verify road clearance
+        const nearest = this.roadIndex.getNearestRoad(fX, fZ, 10);
+        if (nearest && nearest.distance < nearest.roadHalfWidth + 1.5) continue;
+
+        const mat = new THREE.Matrix4();
+        const pos = new THREE.Vector3(fX, fY, fZ);
+        // Align fence parallel to rear property line
+        const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+        mat.compose(pos, quat, new THREE.Vector3(1, 1, 1));
+        outFences.push(mat);
       }
     }
   }

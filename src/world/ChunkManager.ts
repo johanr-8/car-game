@@ -295,6 +295,10 @@ export class TerrainChunk {
   readonly allocatedGantrySlots: number[] = [];
   readonly allocatedBollardSlots: number[] = [];
   readonly allocatedAntennaSlots: number[] = [];
+  readonly allocatedTrafficSignalSlots: number[] = [];
+  readonly allocatedCanopySlots: number[] = [];
+  readonly allocatedParkingStallSlots: number[] = [];
+  readonly allocatedFenceSlots: number[] = [];
 
   private readonly posAttr: THREE.BufferAttribute;
   private readonly normAttr: THREE.BufferAttribute;
@@ -589,6 +593,42 @@ export class TerrainChunk {
         if (slot >= 0) {
           poolManager.antennaPool.setMatrix(slot, props.antennaMatrices[i]);
           this.allocatedAntennaSlots.push(slot);
+        }
+      }
+
+      // 8. Traffic Signal Poles with Cantilever Mast Arms
+      for (let i = 0; i < props.trafficSignalMatrices.length; i++) {
+        const slot = poolManager.trafficSignalPool.allocate();
+        if (slot >= 0) {
+          poolManager.trafficSignalPool.setMatrix(slot, props.trafficSignalMatrices[i]);
+          this.allocatedTrafficSignalSlots.push(slot);
+        }
+      }
+
+      // 9. Building Entrance Portals & Canopies
+      for (let i = 0; i < props.canopyMatrices.length; i++) {
+        const slot = poolManager.canopyPool.allocate();
+        if (slot >= 0) {
+          poolManager.canopyPool.setMatrix(slot, props.canopyMatrices[i]);
+          this.allocatedCanopySlots.push(slot);
+        }
+      }
+
+      // 10. Surface Parking Stalls & Wheel Stops
+      for (let i = 0; i < props.parkingStallMatrices.length; i++) {
+        const slot = poolManager.parkingStallPool.allocate();
+        if (slot >= 0) {
+          poolManager.parkingStallPool.setMatrix(slot, props.parkingStallMatrices[i]);
+          this.allocatedParkingStallSlots.push(slot);
+        }
+      }
+
+      // 11. Perimeter Fences
+      for (let i = 0; i < props.fenceMatrices.length; i++) {
+        const slot = poolManager.fencePool.allocate();
+        if (slot >= 0) {
+          poolManager.fencePool.setMatrix(slot, props.fenceMatrices[i]);
+          this.allocatedFenceSlots.push(slot);
         }
       }
 
@@ -962,6 +1002,89 @@ export class TerrainChunk {
 
       // Add assembled meshes to roadGroup
       if (roadIdx.length >= 6) {
+        // Pedestrian Zebra Crossings at intersection approaches
+        if (!isDirt && !isMountain && !isHighway) {
+          if (isJunctionA && totalEdgeLen >= 20.0) {
+            const targetD = Math.max(6.0, stopA - 2.5);
+            let zStep = 0;
+            for (let p = 0; p < numPts - 1; p++) {
+              if (cumDist[p] <= targetD && cumDist[p + 1] >= targetD) {
+                zStep = p;
+                break;
+              }
+            }
+            const zX = pts[zStep].x;
+            const zZ = pts[zStep].z;
+            if (zX >= minChunkX && zX <= maxChunkX && zZ >= minChunkZ && zZ <= maxChunkZ) {
+              const zY = elev[zStep] + 0.035;
+              const zNx = normX[zStep];
+              const zNz = normZ[zStep];
+              const dX = pts[zStep + 1].x - pts[zStep].x;
+              const dZ = pts[zStep + 1].z - pts[zStep].z;
+              const dLen = Math.hypot(dX, dZ) || 1;
+              const zTx = dX / dLen;
+              const zTz = dZ / dLen;
+
+              const numBars = Math.floor((halfW * 2 - 2.4) / 1.1);
+              for (let b = 0; b < numBars; b++) {
+                const lat = -halfW + 1.2 + b * 1.1 + 0.25;
+                const cX = zX + lat * zNx;
+                const cZ = zZ + lat * zNz;
+                const bStart = stripePos.length / 3;
+
+                stripePos.push(
+                  cX - 1.6 * zTx - 0.24 * zNx, zY, cZ - 1.6 * zTz - 0.24 * zNz,
+                  cX - 1.6 * zTx + 0.24 * zNx, zY, cZ - 1.6 * zTz + 0.24 * zNz,
+                  cX + 1.6 * zTx - 0.24 * zNx, zY, cZ + 1.6 * zTz - 0.24 * zNz,
+                  cX + 1.6 * zTx + 0.24 * zNx, zY, cZ + 1.6 * zTz + 0.24 * zNz
+                );
+                stripeUvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+                stripeIdx.push(bStart, bStart + 1, bStart + 2, bStart + 2, bStart + 1, bStart + 3);
+              }
+            }
+          }
+
+          if (isJunctionB && totalEdgeLen >= 20.0) {
+            const targetD = totalEdgeLen - Math.max(6.0, stopB - 2.5);
+            let zStep = numPts - 2;
+            for (let p = numPts - 2; p >= 0; p--) {
+              if (cumDist[p] <= targetD && cumDist[p + 1] >= targetD) {
+                zStep = p;
+                break;
+              }
+            }
+            const zX = pts[zStep].x;
+            const zZ = pts[zStep].z;
+            if (zX >= minChunkX && zX <= maxChunkX && zZ >= minChunkZ && zZ <= maxChunkZ) {
+              const zY = elev[zStep] + 0.035;
+              const zNx = normX[zStep];
+              const zNz = normZ[zStep];
+              const dX = pts[zStep + 1].x - pts[zStep].x;
+              const dZ = pts[zStep + 1].z - pts[zStep].z;
+              const dLen = Math.hypot(dX, dZ) || 1;
+              const zTx = dX / dLen;
+              const zTz = dZ / dLen;
+
+              const numBars = Math.floor((halfW * 2 - 2.4) / 1.1);
+              for (let b = 0; b < numBars; b++) {
+                const lat = -halfW + 1.2 + b * 1.1 + 0.25;
+                const cX = zX + lat * zNx;
+                const cZ = zZ + lat * zNz;
+                const bStart = stripePos.length / 3;
+
+                stripePos.push(
+                  cX - 1.6 * zTx - 0.24 * zNx, zY, cZ - 1.6 * zTz - 0.24 * zNz,
+                  cX - 1.6 * zTx + 0.24 * zNx, zY, cZ - 1.6 * zTz + 0.24 * zNz,
+                  cX + 1.6 * zTx - 0.24 * zNx, zY, cZ + 1.6 * zTz - 0.24 * zNz,
+                  cX + 1.6 * zTx + 0.24 * zNx, zY, cZ + 1.6 * zTz + 0.24 * zNz
+                );
+                stripeUvs.push(0, 0, 1, 0, 0, 1, 1, 1);
+                stripeIdx.push(bStart, bStart + 1, bStart + 2, bStart + 2, bStart + 1, bStart + 3);
+              }
+            }
+          }
+        }
+
         const roadGeo = this.createIndexedGeometry(roadPos, roadUvs, roadIdx);
         const roadMesh = new THREE.Mesh(roadGeo, roadMat);
         roadMesh.receiveShadow = true;
@@ -1002,6 +1125,50 @@ export class TerrainChunk {
           const whiteGeo = this.createIndexedGeometry(kerbWhitePos, undefined, kerbWhiteIdx);
           const whiteMesh = new THREE.Mesh(whiteGeo, mountainKerbWhiteMat);
           this.roadGroup.add(whiteMesh);
+        }
+
+        // Concrete Viaduct Bridge Piers under elevated road sections
+        const pierPos: number[] = [];
+        const pierIdx: number[] = [];
+        for (let p = 0; p < numPts; p++) {
+          const naturalH = landforms ? landforms.getHeight(pts[p].x, pts[p].z) : 0;
+          const elevDiff = elev[p] - naturalH;
+          if (elevDiff > 3.8 && (p === 0 || Math.floor(cumDist[p] / 24.0) !== Math.floor(cumDist[p - 1] / 24.0))) {
+            const pX = pts[p].x;
+            const pZ = pts[p].z;
+            if (pX >= minChunkX && pX <= maxChunkX && pZ >= minChunkZ && pZ <= maxChunkZ) {
+              const topY = elev[p] - 0.15;
+              const botY = naturalH;
+              const pw = 2.4;
+              const pd = 2.4;
+              const b = pierPos.length / 3;
+
+              pierPos.push(
+                pX - pw * 0.5, botY, pZ - pd * 0.5,
+                pX + pw * 0.5, botY, pZ - pd * 0.5,
+                pX + pw * 0.5, topY, pZ - pd * 0.5,
+                pX - pw * 0.5, topY, pZ - pd * 0.5,
+                pX - pw * 0.5, botY, pZ + pd * 0.5,
+                pX + pw * 0.5, botY, pZ + pd * 0.5,
+                pX + pw * 0.5, topY, pZ + pd * 0.5,
+                pX - pw * 0.5, topY, pZ + pd * 0.5
+              );
+              pierIdx.push(
+                b + 0, b + 2, b + 1, b + 0, b + 3, b + 2,
+                b + 5, b + 6, b + 4, b + 4, b + 6, b + 7,
+                b + 4, b + 7, b + 0, b + 0, b + 7, b + 3,
+                b + 1, b + 2, b + 5, b + 5, b + 2, b + 6,
+                b + 3, b + 7, b + 2, b + 2, b + 7, b + 6
+              );
+            }
+          }
+        }
+        if (pierIdx.length >= 6) {
+          const pierGeo = this.createIndexedGeometry(pierPos, undefined, pierIdx);
+          const pierMesh = new THREE.Mesh(pierGeo, sidewalkMat);
+          pierMesh.castShadow = true;
+          pierMesh.receiveShadow = true;
+          this.roadGroup.add(pierMesh);
         }
       }
     }
@@ -1088,6 +1255,18 @@ export class TerrainChunk {
       for (let i = 0; i < this.allocatedAntennaSlots.length; i++) {
         poolManager.antennaPool.free(this.allocatedAntennaSlots[i]);
       }
+      for (let i = 0; i < this.allocatedTrafficSignalSlots.length; i++) {
+        poolManager.trafficSignalPool.free(this.allocatedTrafficSignalSlots[i]);
+      }
+      for (let i = 0; i < this.allocatedCanopySlots.length; i++) {
+        poolManager.canopyPool.free(this.allocatedCanopySlots[i]);
+      }
+      for (let i = 0; i < this.allocatedParkingStallSlots.length; i++) {
+        poolManager.parkingStallPool.free(this.allocatedParkingStallSlots[i]);
+      }
+      for (let i = 0; i < this.allocatedFenceSlots.length; i++) {
+        poolManager.fencePool.free(this.allocatedFenceSlots[i]);
+      }
     }
     this.allocatedTreeSlots.length = 0;
     this.allocatedLampSlots.length = 0;
@@ -1095,6 +1274,10 @@ export class TerrainChunk {
     this.allocatedGantrySlots.length = 0;
     this.allocatedBollardSlots.length = 0;
     this.allocatedAntennaSlots.length = 0;
+    this.allocatedTrafficSignalSlots.length = 0;
+    this.allocatedCanopySlots.length = 0;
+    this.allocatedParkingStallSlots.length = 0;
+    this.allocatedFenceSlots.length = 0;
 
     // Remove landmark visual mesh
     if (this.landmarkGroup) {

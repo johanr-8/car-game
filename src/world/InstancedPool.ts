@@ -240,6 +240,149 @@ function createRooftopAntennaGeometry(): THREE.BufferGeometry {
   return mergeBufferGeometries([base, mast, beacon]);
 }
 
+function createTrafficSignalGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  // Base mounting plate
+  const base = new THREE.CylinderGeometry(0.24, 0.28, 0.30, 8);
+  base.translate(0, 0.15, 0);
+  parts.push(base);
+
+  // Vertical steel mast (6.4m tall)
+  const mast = new THREE.CylinderGeometry(0.11, 0.16, 6.4, 8);
+  mast.translate(0, 3.35, 0);
+  parts.push(mast);
+
+  // Cantilever horizontal arm extending out over roadway lanes (5.8m span)
+  const arm = new THREE.CylinderGeometry(0.07, 0.10, 5.8, 8);
+  arm.rotateZ(-Math.PI * 0.5);
+  arm.translate(2.9, 6.2, 0);
+  parts.push(arm);
+
+  // Overhead 3-lamp traffic signal housing
+  const head = new THREE.BoxGeometry(0.42, 1.25, 0.35);
+  head.translate(4.8, 5.6, 0);
+  parts.push(head);
+
+  // Red, Amber, Green visor hoods
+  for (let l = 0; l < 3; l++) {
+    const yOff = 6.0 - l * 0.40;
+    const visor = new THREE.CylinderGeometry(0.14, 0.14, 0.22, 8, 1, false, 0, Math.PI);
+    visor.rotateX(Math.PI * 0.5);
+    visor.translate(4.8, yOff, 0.22);
+    parts.push(visor);
+  }
+
+  // Curbside pedestrian signal head
+  const curbHead = new THREE.BoxGeometry(0.32, 0.75, 0.28);
+  curbHead.translate(0.35, 3.2, 0);
+  parts.push(curbHead);
+
+  return mergeBufferGeometries(parts);
+}
+
+function createEntranceCanopyGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  // 1. Concrete entrance porch / steps
+  const steps = new THREE.BoxGeometry(4.4, 0.30, 2.4);
+  steps.translate(0, 0.15, 0.8);
+  parts.push(steps);
+
+  // 2. Doorway portal frame
+  const postL = new THREE.BoxGeometry(0.3, 3.2, 0.4);
+  postL.translate(-1.8, 1.6, -0.2);
+  parts.push(postL);
+
+  const postR = new THREE.BoxGeometry(0.3, 3.2, 0.4);
+  postR.translate(1.8, 1.6, -0.2);
+  parts.push(postR);
+
+  const lintel = new THREE.BoxGeometry(3.9, 0.3, 0.4);
+  lintel.translate(0, 3.05, -0.2);
+  parts.push(lintel);
+
+  // 3. Glass entrance double-doors
+  const doors = new THREE.BoxGeometry(3.3, 2.8, 0.08);
+  doors.translate(0, 1.45, -0.25);
+  parts.push(doors);
+
+  // 4. Modern cantilever canopy slab
+  const canopy = new THREE.BoxGeometry(4.6, 0.18, 2.8);
+  canopy.translate(0, 3.25, 1.0);
+  parts.push(canopy);
+
+  // 5. Twin steel suspension tie-rods
+  for (let s = -1; s <= 1; s += 2) {
+    const rod = new THREE.CylinderGeometry(0.04, 0.04, 2.4, 6);
+    rod.rotateX(-0.55);
+    rod.translate(s * 2.0, 4.1, 0.9);
+    parts.push(rod);
+  }
+
+  return mergeBufferGeometries(parts);
+}
+
+function createParkingStallGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  // Left painted stall line (width 0.12m, length 5.0m)
+  const leftStripe = new THREE.BoxGeometry(0.12, 0.02, 5.0);
+  leftStripe.translate(-1.3, 0.01, 2.5);
+  parts.push(leftStripe);
+
+  // Right painted stall line
+  const rightStripe = new THREE.BoxGeometry(0.12, 0.02, 5.0);
+  rightStripe.translate(1.3, 0.01, 2.5);
+  parts.push(rightStripe);
+
+  // Head boundary line
+  const headStripe = new THREE.BoxGeometry(2.72, 0.02, 0.12);
+  headStripe.translate(0, 0.01, 0.06);
+  parts.push(headStripe);
+
+  // Concrete wheel stop bumper (1.8m x 0.14m x 0.16m)
+  const wheelStop = new THREE.BoxGeometry(1.8, 0.14, 0.16);
+  wheelStop.translate(0, 0.07, 0.70);
+  parts.push(wheelStop);
+
+  return mergeBufferGeometries(parts);
+}
+
+function createFenceGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  // Left and right vertical posts (3.5m spacing)
+  const post1 = new THREE.CylinderGeometry(0.06, 0.06, 1.35, 6);
+  post1.translate(-1.75, 0.675, 0);
+  parts.push(post1);
+
+  const post2 = new THREE.CylinderGeometry(0.06, 0.06, 1.35, 6);
+  post2.translate(1.75, 0.675, 0);
+  parts.push(post2);
+
+  // Horizontal top rail
+  const topRail = new THREE.CylinderGeometry(0.035, 0.035, 3.5, 6);
+  topRail.rotateZ(Math.PI * 0.5);
+  topRail.translate(0, 1.25, 0);
+  parts.push(topRail);
+
+  // Horizontal bottom rail
+  const botRail = new THREE.CylinderGeometry(0.035, 0.035, 3.5, 6);
+  botRail.rotateZ(Math.PI * 0.5);
+  botRail.translate(0, 0.25, 0);
+  parts.push(botRail);
+
+  // Vertical pickets
+  for (let i = -3; i <= 3; i++) {
+    const picket = new THREE.CylinderGeometry(0.02, 0.02, 1.05, 4);
+    picket.translate(i * 0.45, 0.75, 0);
+    parts.push(picket);
+  }
+
+  return mergeBufferGeometries(parts);
+}
+
 function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
   let totalVerts = 0;
   let totalIndices = 0;
@@ -308,6 +451,10 @@ export class CityPoolManager {
   readonly gantryPool: InstancedPool;
   readonly bollardPool: InstancedPool;
   readonly antennaPool: InstancedPool;
+  readonly trafficSignalPool: InstancedPool;
+  readonly canopyPool: InstancedPool;
+  readonly parkingStallPool: InstancedPool;
+  readonly fencePool: InstancedPool;
   readonly rootGroup = new THREE.Group();
 
   // Capacities configured with generous safety factor
@@ -318,6 +465,10 @@ export class CityPoolManager {
   static readonly GANTRY_CAPACITY = 150;
   static readonly BOLLARD_CAPACITY = 1200;
   static readonly ANTENNA_CAPACITY = 400;
+  static readonly TRAFFIC_SIGNAL_CAPACITY = 400;
+  static readonly CANOPY_CAPACITY = 500;
+  static readonly PARKING_STALL_CAPACITY = 800;
+  static readonly FENCE_CAPACITY = 800;
 
   constructor() {
     const unitBox = new THREE.BoxGeometry(1, 1, 1);
@@ -328,6 +479,10 @@ export class CityPoolManager {
     const gantryGeo = createHighwayGantryGeometry();
     const bollardGeo = createStreetBollardGeometry();
     const antennaGeo = createRooftopAntennaGeometry();
+    const trafficSignalGeo = createTrafficSignalGeometry();
+    const canopyGeo = createEntranceCanopyGeometry();
+    const parkingStallGeo = createParkingStallGeometry();
+    const fenceGeo = createFenceGeometry();
 
     // 1. Materials for 6 building styles
     const glassMat = new THREE.MeshStandardMaterial({
@@ -432,7 +587,39 @@ export class CityPoolManager {
       roughness: 0.30,
     });
 
-    // 4. Instantiate pools
+    // 4. Urban Realism Materials (Traffic Signals, Canopies, Parking, Fences)
+    const trafficSignalMat = new THREE.MeshStandardMaterial({
+      color: 0x1e293b,
+      roughness: 0.35,
+      metalness: 0.85,
+      emissive: 0x10b981, // Glowing green signal lamp
+      emissiveIntensity: 0.65,
+    });
+
+    const canopyMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.45,
+      metalness: 0.75,
+      emissive: 0xffe4b5, // Warm interior lobby glow
+      emissiveIntensity: 0.85,
+    });
+
+    const parkingStallMat = new THREE.MeshStandardMaterial({
+      color: 0xf8fafc,
+      roughness: 0.60,
+      metalness: 0.10,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+
+    const fenceMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      roughness: 0.50,
+      metalness: 0.70,
+    });
+
+    // 5. Instantiate pools
     this.buildingPools = {
       [BuildingStyle.GLASS]: new InstancedPool('Building_Glass', unitBox, glassMat, CityPoolManager.BUILDING_CAPACITY),
       [BuildingStyle.CONCRETE]: new InstancedPool('Building_Concrete', unitBox, concreteMat, CityPoolManager.BUILDING_CAPACITY),
@@ -453,6 +640,10 @@ export class CityPoolManager {
     this.gantryPool = new InstancedPool('Props_Gantry', gantryGeo, gantryMat, CityPoolManager.GANTRY_CAPACITY);
     this.bollardPool = new InstancedPool('Props_Bollard', bollardGeo, bollardMat, CityPoolManager.BOLLARD_CAPACITY);
     this.antennaPool = new InstancedPool('Props_Antenna', antennaGeo, antennaMat, CityPoolManager.ANTENNA_CAPACITY);
+    this.trafficSignalPool = new InstancedPool('Props_TrafficSignal', trafficSignalGeo, trafficSignalMat, CityPoolManager.TRAFFIC_SIGNAL_CAPACITY);
+    this.canopyPool = new InstancedPool('Props_Canopy', canopyGeo, canopyMat, CityPoolManager.CANOPY_CAPACITY);
+    this.parkingStallPool = new InstancedPool('Props_ParkingStall', parkingStallGeo, parkingStallMat, CityPoolManager.PARKING_STALL_CAPACITY);
+    this.fencePool = new InstancedPool('Props_Fence', fenceGeo, fenceMat, CityPoolManager.FENCE_CAPACITY);
 
     // Mount to rootGroup
     for (const style of Object.values(BuildingStyle)) {
@@ -466,6 +657,10 @@ export class CityPoolManager {
     this.rootGroup.add(this.gantryPool.mesh);
     this.rootGroup.add(this.bollardPool.mesh);
     this.rootGroup.add(this.antennaPool.mesh);
+    this.rootGroup.add(this.trafficSignalPool.mesh);
+    this.rootGroup.add(this.canopyPool.mesh);
+    this.rootGroup.add(this.parkingStallPool.mesh);
+    this.rootGroup.add(this.fencePool.mesh);
   }
 
   commitAll(): void {
@@ -480,6 +675,10 @@ export class CityPoolManager {
     this.gantryPool.commit();
     this.bollardPool.commit();
     this.antennaPool.commit();
+    this.trafficSignalPool.commit();
+    this.canopyPool.commit();
+    this.parkingStallPool.commit();
+    this.fencePool.commit();
   }
 
   dispose(): void {
@@ -494,5 +693,9 @@ export class CityPoolManager {
     this.gantryPool.dispose();
     this.bollardPool.dispose();
     this.antennaPool.dispose();
+    this.trafficSignalPool.dispose();
+    this.canopyPool.dispose();
+    this.parkingStallPool.dispose();
+    this.fencePool.dispose();
   }
 }
