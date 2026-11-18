@@ -64,7 +64,7 @@ export class HudSystem {
     gameState: GameState,
     countdownTimer: number,
     playerVehicle: VehicleEntity,
-    worldSystem: WorldSystem,
+    worldSystem: WorldSystem | null | undefined,
     hasGhost: boolean,
     bestLapTime: number | null,
     dt: number,
@@ -85,7 +85,7 @@ export class HudSystem {
     }
 
     // 3. Telemetry HUD visibility
-    if (gameState === GameState.COUNTDOWN || gameState === GameState.RACING) {
+    if (gameState === GameState.COUNTDOWN || gameState === GameState.RACING || gameState === GameState.ROAMING) {
       this.raceHUD.show();
       if (gameState === GameState.COUNTDOWN || countdownTimer > -1.0) {
         this.raceHUD.updateCountdown(countdownTimer);
@@ -98,12 +98,12 @@ export class HudSystem {
       p.bestLapTime = bestLapTime;
       p.lapCount = playerVehicle.progress.lapCount;
       p.activeCheckpoint = playerVehicle.progress.activeCheckpointIndex;
-      p.totalCheckpoints = worldSystem.track.checkpoints.length;
+      p.totalCheckpoints = worldSystem ? worldSystem.track.checkpoints.length : 0;
       p.speedKmh = playerVehicle.controller.speed * 3.6;
       p.boostCharge = playerVehicle.boost.charge;
       p.isBoosting = playerVehicle.controller.boostActive;
       p.hasGhost = hasGhost;
-      p.isInverted = worldSystem.inversion.isInverted;
+      p.isInverted = worldSystem ? worldSystem.inversion.isInverted : false;
       p.isWrongWay = playerVehicle.progress.isWrongWay;
       p.dt = dt;
 

@@ -16,8 +16,9 @@ import { ChaseCamera } from '../car/ChaseCamera';
 import { GhostRecorder } from '../car/GhostRecorder';
 import { GhostModel } from '../car/GhostModel';
 import type { InputState } from '../core/InputManager';
-import type { CollisionWorld } from '../world/CollisionWorld';
+import type { SurfaceProvider } from '../world/SurfaceProvider';
 import type { TrackQuery } from '../world/TrackQuery';
+import { ROAM_SPAWN_POS, ROAM_SPAWN_QUAT } from '../world/RoamWorld';
 
 const _ghostPos = new THREE.Vector3();
 const _ghostQuat = new THREE.Quaternion();
@@ -28,8 +29,8 @@ export class VehicleSystem {
   readonly vehicles: VehicleEntity[] = [];
   readonly playerVehicle: VehicleEntity;
 
-  readonly ghostRecorder = new GhostRecorder();
-  readonly ghostModel = new GhostModel();
+  ghostRecorder: GhostRecorder | null = null;
+  ghostModel: GhostModel | null = null;
   readonly chaseCamera: ChaseCamera;
 
   constructor(scene: THREE.Scene, aspect: number) {
@@ -39,12 +40,22 @@ export class VehicleSystem {
     this.playerVehicle = new VehicleEntity('player', 0xd41c1c, true);
     this.addVehicle(this.playerVehicle);
 
-    // 2. Ghost Model for Best Lap Telemetry
-    this.scene.add(this.ghostModel.group);
-
-    // 3. 6DOF Chase Camera
+    // 2. 6DOF Chase Camera
     this.chaseCamera = new ChaseCamera(aspect);
     this.scene.add(this.chaseCamera.camera);
+  }
+
+  /**
+   * Lazily initializes ghost recorder and visuals for Race mode only.
+   */
+  initRaceGhosts(): void {
+    if (!this.ghostRecorder) {
+      this.ghostRecorder = new GhostRecorder();
+    }
+    if (!this.ghostModel) {
+      this.ghostModel = new GhostModel();
+      this.scene.add(this.ghostModel.group);
+    }
   }
 
   addVehicle(vehicle: VehicleEntity): void {
@@ -63,40 +74,53 @@ export class VehicleSystem {
   }
 
   /**
+   * Resets vehicle transforms and camera to Free Roam spawn point.
+   */
+  respawnRoam(vehicle: VehicleEntity = this.playerVehicle): void {
+    vehicle.reset(ROAM_SPAWN_POS, ROAM_SPAWN_QUAT);
+    if (vehicle.isPlayer) {
+      this.chaseCamera.reset(ROAM_SPAWN_POS, ROAM_SPAWN_QUAT);
+    }
+  }
+
+  /**
    * 120Hz physics update across all vehicles.
    */
   updatePhysics(
     dt: number,
     playerInput: InputState,
-    collision: CollisionWorld,
-    trackQuery: TrackQuery
+    surface: SurfaceProvider,
+    trackQuery?: TrackQuery
   ): void {
     for (let i = 0; i < this.vehicles.length; i++) {
       const v = this.vehicles[i];
       const input = v.isPlayer ? playerInput : playerInput; // Future: AI controller input
 
       // 1. Vehicle dynamics & boost step
-      v.updatePhysics(dt, input, collision);
+      v.updatePhysics(dt, input, surface);
 
-      // 2. Track containment (bypassed if airborne)
-      trackQuery.containVehicle(v);
+      // 2. Track containment, apex bonus, wrong-way (Race mode only)
+      if (trackQuery) {
+        trackQuery.containVehicle(v);
+        trackQuery.checkApexBonus(v);
+        trackQuery.updateWrongWay(v, dt);
 
-      // 3. Apex inside curb clipping bonus (+3%)
-      trackQuery.checkApexBonus(v);
-
-      // 4. Wrong-way detection
-      trackQuery.updateWrongWay(v, dt);
-
-      // 4. Void Fail-Safe Rescue
-      if (v.controller.position.y < -5) {
-        const rescueIdx = v.progress.activeCheckpointIndex > 0 ? v.progress.activeCheckpointIndex - 1 : 0;
-        const cp = trackQuery.track.checkpoints[rescueIdx];
-        if (cp) {
-          _rescuePos.copy(cp.position).addScaledVector(cp.normal, 0.35);
-          v.controller.position.copy(_rescuePos);
-          v.controller.prevPosition.copy(_rescuePos);
-          v.controller.velocity.set(0, 0, 0);
-          v.controller.speed = 0;
+        // Void Fail-Safe Rescue to previous checkpoint
+        if (v.controller.position.y < -5) {
+          const rescueIdx = v.progress.activeCheckpointIndex > 0 ? v.progress.activeCheckpointIndex - 1 : 0;
+          const cp = trackQuery.track.checkpoints[rescueIdx];
+          if (cp) {
+            _rescuePos.copy(cp.position).addScaledVector(cp.normal, 0.35);
+            v.controller.position.copy(_rescuePos);
+            v.controller.prevPosition.copy(_rescuePos);
+            v.controller.velocity.set(0, 0, 0);
+            v.controller.speed = 0;
+          }
+        }
+      } else {
+        // Free Roam void rescue: falling below y = -50 respawns
+        if (v.controller.position.y < -50) {
+          this.respawnRoam(v);
         }
       }
     }
@@ -105,11 +129,13 @@ export class VehicleSystem {
   /**
    * Staging standstill update during countdown.
    */
-  updateStaging(collision: CollisionWorld, trackQuery: TrackQuery): void {
+  updateStaging(surface: SurfaceProvider, trackQuery?: TrackQuery): void {
     for (let i = 0; i < this.vehicles.length; i++) {
       const v = this.vehicles[i];
-      v.updateStaging(collision);
-      trackQuery.containVehicle(v);
+      v.updateStaging(surface);
+      if (trackQuery) {
+        trackQuery.containVehicle(v);
+      }
     }
   }
 
@@ -122,8 +148,8 @@ export class VehicleSystem {
       this.vehicles[i].updateVisuals(alpha, isBraking);
     }
 
-    // 2. Ghost Car replay
-    if (this.ghostRecorder.hasBestLap && isRacing) {
+    // 2. Ghost Car replay (Race mode only)
+    if (this.ghostRecorder && this.ghostModel && this.ghostRecorder.hasBestLap && isRacing) {
       this.ghostModel.setVisible(true);
       const hasFrame = this.ghostRecorder.getGhostTransform(
         this.playerVehicle.progress.currentLapTime,
@@ -134,7 +160,7 @@ export class VehicleSystem {
         this.ghostModel.group.position.copy(_ghostPos);
         this.ghostModel.group.quaternion.copy(_ghostQuat);
       }
-    } else {
+    } else if (this.ghostModel) {
       this.ghostModel.setVisible(false);
     }
 

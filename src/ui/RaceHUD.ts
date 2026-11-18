@@ -15,6 +15,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
+import { GameMode } from '../systems/GameState';
 
 export interface RaceHUDUpdateParams {
   currentLapTime: number;
@@ -34,6 +35,7 @@ export interface RaceHUDUpdateParams {
 
 export class RaceHUD {
   private readonly root: HTMLDivElement;
+  private readonly topBar: HTMLDivElement;
   private displaySpeed = 0;
 
   private readonly elLapTime:     HTMLSpanElement;
@@ -143,9 +145,9 @@ export class RaceHUD {
     this.root.appendChild(topLeftBox);
 
     // ── 2. Top Header Bar (Timer, Position, Checkpoints) ─────
-    const topBar = document.createElement('div');
-    topBar.id = 'hud-top-bar';
-    Object.assign(topBar.style, {
+    this.topBar = document.createElement('div');
+    this.topBar.id = 'hud-top-bar';
+    Object.assign(this.topBar.style, {
       position:       'absolute',
       top:            '16px',
       left:           '50%',
@@ -209,12 +211,12 @@ export class RaceHUD {
     this.elCheckpoints.textContent = '0 / 8';
     colCP.appendChild(this.elCheckpoints);
 
-    topBar.appendChild(colPos);
-    topBar.appendChild(colLap);
-    topBar.appendChild(colTime);
-    topBar.appendChild(colBest);
-    topBar.appendChild(colCP);
-    this.root.appendChild(topBar);
+    this.topBar.appendChild(colPos);
+    this.topBar.appendChild(colLap);
+    this.topBar.appendChild(colTime);
+    this.topBar.appendChild(colBest);
+    this.topBar.appendChild(colCP);
+    this.root.appendChild(this.topBar);
 
     // ── 3. Center Inversion Alert Banner ─────────────────────
     this.elInversion = document.createElement('div');
@@ -566,6 +568,19 @@ export class RaceHUD {
 
   hide(): void {
     this.root.style.display = 'none';
+  }
+
+  setMode(mode: GameMode): void {
+    const isRoam = mode === GameMode.ROAM;
+    this.topBar.style.display = isRoam ? 'none' : 'flex';
+    this.elSeedBadge.style.display = isRoam ? 'none' : 'block';
+    this.elGhostState.style.display = isRoam ? 'none' : 'block';
+    if (isRoam) {
+      this.elInversion.style.display = 'none';
+      this.elWrongWay.style.display = 'none';
+      this.elCountdown.style.display = 'none';
+      this.elBanner.style.display = 'none';
+    }
   }
 
   setSeedBadge(seed: number, themeName: string, isDaily: boolean): void {

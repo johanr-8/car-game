@@ -1,14 +1,15 @@
 /**
  * src/main.ts
  * ─────────────────────────────────────────────────────────────
- * Warp City: Velocity Drift — High-Octane 6DOF Arcade Time Trial.
+ * Warp City: Velocity Drift — High-Octane 6DOF Arcade Time Trial & Free Roam.
  *
  * Architecture:
  *   - Thin loop orchestrator delegating to specialized subsystems:
- *       • WorldSystem: Atmosphere, lighting, city LOD & track query
+ *       • WorldSystem: Atmosphere, lighting, city LOD & track query (Race mode)
+ *       • RoamWorld: Large flat grass, test road cross & obstacle boxes (Roam mode)
  *       • VehicleSystem: Multi-vehicle array, physics, camera & ghost
  *       • HudSystem: Dirty-checked telemetry, debug overlay & tuning panel
- *       • RaceSystem: State machine (MENU, COUNTDOWN, RACING, FINISHED, PAUSED)
+ *       • RaceSystem: State machine (MENU, COUNTDOWN, RACING, ROAMING, FINISHED, PAUSED)
  *   - 120Hz fixed-timestep physics loop with α-interpolated rendering
  *   - WebGL2 + Bloom Post-Processing
  *
@@ -20,8 +21,10 @@ import { FIXED_DT, MAX_ACCUMULATOR } from './core/constants';
 import { createRenderer } from './core/Renderer';
 import { createComposer } from './core/PostProcessing';
 import { readInput } from './core/InputManager';
-import { WorldSystem, VehicleSystem, HudSystem, RaceSystem, GameState } from './systems';
+import { VehicleSystem, HudSystem, RaceSystem, GameState, GameMode } from './systems';
 import { isDevMode } from './core/DevMode';
+import { SeededRandom } from './core/SeededRandom';
+import { CITY_THEMES } from './world/TimeOfDay';
 import type { GraphicsQuality } from './core/Settings';
 
 // ── Scene & WebGL Renderer ───────────────────────────────────
@@ -30,20 +33,25 @@ const renderer = createRenderer(container);
 const scene = new THREE.Scene();
 
 // ── Subsystems ───────────────────────────────────────────────
-const worldSystem = new WorldSystem(scene, renderer);
 const vehicleSystem = new VehicleSystem(scene, container.clientWidth / container.clientHeight);
 const hudSystem = new HudSystem();
 
 // Post-Processing pipeline
 const composer = createComposer(renderer, scene, vehicleSystem.chaseCamera.camera);
 
-const raceSystem = new RaceSystem(worldSystem, vehicleSystem, hudSystem, renderer, composer);
+const raceSystem = new RaceSystem(scene, renderer, vehicleSystem, hudSystem, composer);
+
+// ── Quick-Testing URL Parameter (?mode=roam) ─────────────────
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('mode') === 'roam') {
+  raceSystem.startRoam();
+}
 
 if (isDevMode()) {
   (window as any).__WARP_DEBUG__ = {
     raceSystem,
     vehicleSystem,
-    worldSystem,
+    worldSystem: raceSystem.worldSystem,
     hudSystem,
     renderer,
     composer,
@@ -61,7 +69,9 @@ if (isDevMode()) {
         accum += DT_FRAME;
         while (accum >= FIXED_DT - 1e-8) {
           raceSystem.updatePhysics(FIXED_DT, dummyInput);
-          worldSystem.updatePhysics(FIXED_DT, 1, 0.94);
+          if (raceSystem.worldSystem) {
+            raceSystem.worldSystem.updatePhysics(FIXED_DT, 1, 0.94);
+          }
           accum -= FIXED_DT;
         }
         vehicleSystem.updateVisuals(1, DT_FRAME, false, true);
@@ -114,17 +124,21 @@ if (isDevMode()) {
             player.progress.lapCount = 1;
           }
           raceSystem.updatePhysics(FIXED_DT, input);
-          worldSystem.updatePhysics(
-            FIXED_DT,
-            player.progress.activeCheckpointIndex,
-            player.controller.position.y
-          );
+          if (raceSystem.worldSystem) {
+            raceSystem.worldSystem.updatePhysics(
+              FIXED_DT,
+              player.progress.activeCheckpointIndex,
+              player.controller.position.y
+            );
+          }
           accum -= FIXED_DT;
           hudSystem.stats.ticksThisFrame++;
         }
 
         vehicleSystem.updateVisuals(accum / FIXED_DT, DT_FRAME, false, true);
-        worldSystem.updateVisuals(player.controller.position.x, player.controller.position.z);
+        if (raceSystem.worldSystem) {
+          raceSystem.worldSystem.updateVisuals(player.controller.position.x, player.controller.position.z);
+        }
 
         renderer.info.reset();
         const t0 = performance.now();
@@ -163,11 +177,9 @@ if (isDevMode()) {
 }
 
 // Initial HUD seed badge
-hudSystem.raceHUD.setSeedBadge(
-  worldSystem.currentSeed,
-  worldSystem.currentTheme.name,
-  worldSystem.isDaily
-);
+const initialSeed = SeededRandom.getDailySeed();
+const initialTheme = CITY_THEMES[0];
+hudSystem.raceHUD.setSeedBadge(initialSeed, initialTheme.name, true);
 
 // ── Window Resize ────────────────────────────────────────────
 window.addEventListener('resize', () => {
@@ -196,10 +208,14 @@ function loop(): void {
 
   if (raceSystem.gameState !== GameState.MENU) {
     if (input.restart) {
-      raceSystem.restartRace();
+      if (raceSystem.gameMode === GameMode.ROAM) {
+        raceSystem.respawnRoam();
+      } else {
+        raceSystem.restartRace();
+      }
     }
 
-    if (input.remix) {
+    if (input.remix && raceSystem.gameMode === GameMode.RACE) {
       raceSystem.remixCity();
     }
   }
@@ -209,15 +225,17 @@ function loop(): void {
   while (accumulator >= FIXED_DT - 1e-8) {
     const player = vehicleSystem.playerVehicle;
 
-    // 1. Race & Vehicle physics progression
+    // 1. Mode-specific physics progression (Race or Roam)
     raceSystem.updatePhysics(FIXED_DT, input);
 
-    // 2. World & Inversion update
-    worldSystem.updatePhysics(
-      FIXED_DT,
-      player.progress.activeCheckpointIndex,
-      player.controller.position.y
-    );
+    // 2. World & Inversion update (Race mode only)
+    if (raceSystem.gameMode === GameMode.RACE && raceSystem.worldSystem) {
+      raceSystem.worldSystem.updatePhysics(
+        FIXED_DT,
+        player.progress.activeCheckpointIndex,
+        player.controller.position.y
+      );
+    }
 
     accumulator -= FIXED_DT;
     hudSystem.stats.ticksThisFrame++;
@@ -235,8 +253,10 @@ function loop(): void {
     raceSystem.gameState === GameState.RACING
   );
 
-  // 2. Chunk streaming LOD around player
-  worldSystem.updateVisuals(player.controller.position.x, player.controller.position.z);
+  // 2. Chunk streaming LOD around player (Race mode only)
+  if (raceSystem.gameMode === GameMode.RACE && raceSystem.worldSystem) {
+    raceSystem.worldSystem.updateVisuals(player.controller.position.x, player.controller.position.z);
+  }
 
   // 3. Render scene
   renderer.info.reset();
@@ -247,9 +267,9 @@ function loop(): void {
     raceSystem.gameState,
     raceSystem.countdownTimer,
     player,
-    worldSystem,
-    vehicleSystem.ghostRecorder.hasBestLap,
-    vehicleSystem.ghostRecorder.bestLapTime,
+    raceSystem.worldSystem,
+    vehicleSystem.ghostRecorder ? vehicleSystem.ghostRecorder.hasBestLap : false,
+    vehicleSystem.ghostRecorder ? vehicleSystem.ghostRecorder.bestLapTime : null,
     dt,
     dtMs,
     renderer

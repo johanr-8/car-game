@@ -17,7 +17,7 @@
 import * as THREE from 'three';
 import { CarConfig as C } from './CarConfig';
 import type { InputState } from '../core/InputManager';
-import type { CollisionWorld, SurfaceHit } from '../world/CollisionWorld';
+import type { SurfaceProvider, SurfaceHit } from '../world/SurfaceProvider';
 
 // Pre-allocated scratch objects (Zero per-frame allocations)
 const _fwd          = new THREE.Vector3();
@@ -98,7 +98,7 @@ export class ArcadeCarController {
   /**
    * 120Hz fixed-timestep physics update.
    */
-  update(dt: number, input: InputState, collision: CollisionWorld): void {
+  update(dt: number, input: InputState, collision: SurfaceProvider): void {
     // 1. Snapshot previous state for interpolated rendering
     this.prevPosition.copy(this.position);
     this.prevQuaternion.copy(this.quaternion);
@@ -133,7 +133,7 @@ export class ArcadeCarController {
   /**
    * Surface raycasting: downward probe along surfaceNormal to glue car to track on any 6DOF surface.
    */
-  private detectSurface(collision: CollisionWorld): void {
+  private detectSurface(collision: SurfaceProvider): void {
     // Cast probe from slightly above car down along -surfaceNormal
     _probePos.copy(this.position).addScaledVector(this.surfaceNormal, 1.4);
     _probeDir.copy(this.surfaceNormal).negate();
@@ -327,7 +327,7 @@ export class ArcadeCarController {
    * Integrate displacement and handle obstacle collision (walls, barriers, buildings).
    * Employs multi-point wheel swept probes so the car hitbox uses the wheels as boundary edges.
    */
-  private integrateMotion(dt: number, collision: CollisionWorld): void {
+  private integrateMotion(dt: number, collision: SurfaceProvider): void {
     const halfW = C.carWidth * 0.5; // 0.675m (wheel edge distance)
     const probeY = C.carHeight * 0.35; // raised slightly above road
 
@@ -416,7 +416,7 @@ export class ArcadeCarController {
   /**
    * Ground and align car at standstill during race countdown staging.
    */
-  updateStaging(collision: CollisionWorld): void {
+  updateStaging(collision: SurfaceProvider): void {
     this.speed = 0;
     this.velocity.set(0, 0, 0);
     this.detectSurface(collision);

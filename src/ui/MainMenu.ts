@@ -13,6 +13,7 @@ export class MainMenu {
   private readonly elBestTime: HTMLDivElement;
 
   onPlay?: () => void;
+  onRoam?: () => void;
   onSettings?: () => void;
   onControls?: () => void;
 
@@ -114,11 +115,24 @@ export class MainMenu {
       return btn;
     };
 
+    const playRow = document.createElement('div');
+    playRow.style.cssText = 'display:flex;gap:10px;width:100%;';
+
     const btnPlay = createBtn('▶ PLAY RACE', true, () => this.onPlay?.());
+    btnPlay.style.flex = '1';
+
+    const btnRoam = createBtn('🚗 FREE ROAM', true, () => this.onRoam?.());
+    btnRoam.style.flex = '1';
+    btnRoam.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+    btnRoam.style.boxShadow = '0 8px 24px rgba(5,150,105,0.45)';
+
+    playRow.appendChild(btnPlay);
+    playRow.appendChild(btnRoam);
+
     const btnSettings = createBtn('⚙ SETTINGS', false, () => this.onSettings?.());
     const btnControls = createBtn('🎮 CONTROLS', false, () => this.onControls?.());
 
-    btnGroup.appendChild(btnPlay);
+    btnGroup.appendChild(playRow);
     btnGroup.appendChild(btnSettings);
     btnGroup.appendChild(btnControls);
     container.appendChild(btnGroup);

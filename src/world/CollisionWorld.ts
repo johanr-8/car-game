@@ -16,20 +16,16 @@ import {
   acceleratedRaycast,
   StaticGeometryGenerator,
 } from 'three-mesh-bvh';
+import type { SurfaceHit, SurfaceProvider } from './SurfaceProvider';
+
+export type { SurfaceHit, SurfaceProvider };
 
 // Install three-mesh-bvh methods onto Three prototypes
 (THREE.BufferGeometry.prototype as any).computeBoundsTree = computeBoundsTree;
 (THREE.BufferGeometry.prototype as any).disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export interface SurfaceHit {
-  hit: boolean;
-  distance: number;
-  point: THREE.Vector3;
-  normal: THREE.Vector3;
-}
-
-export class CollisionWorld {
+export class CollisionWorld implements SurfaceProvider {
   /** Group containing all low-poly collision proxy meshes */
   readonly proxyGroup = new THREE.Group();
 

@@ -1,22 +1,25 @@
 /**
  * src/systems/RaceSystem.ts
  * ─────────────────────────────────────────────────────────────
- * Race Progression & Game State Machine:
- *   - States: MENU, COUNTDOWN, RACING, FINISHED, PAUSED
+ * Game State Machine & Mode Orchestrator:
+ *   - Modes: RACE (Championship time trial) | ROAM (Free Roam sandbox)
+ *   - States: MENU, COUNTDOWN, RACING, ROAMING, FINISHED, PAUSED
  *   - Main menu, pause menu, settings, controls, results orchestration
- *   - GPU shader warm-up before countdown
- *   - Plane-crossing checkpoint gates with layer height checks
- *   - Clean sector (+10%) & apex inside curb (+3%) rewards
- *   - 3-lap championship victory & local Top 10 leaderboard persistence
+ *   - GPU shader warm-up before race countdown
+ *   - Race rules: plane-crossing gates, clean sector & apex rewards, 3-lap victory
+ *   - Roam rules: sandbox traversal, R respawns, y < -50 void fail-safe, no race systems
  *   - Conflict-free Escape, R, M, and F-key routing
  * ─────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
 import type { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { GameState } from './GameState';
-import type { WorldSystem } from './WorldSystem';
+import { GameState, GameMode } from './GameState';
+import { WorldSystem } from './WorldSystem';
 import type { VehicleSystem } from './VehicleSystem';
 import type { HudSystem } from './HudSystem';
+import { RoamWorld, ROAM_SPAWN_POS, ROAM_SPAWN_QUAT } from '../world/RoamWorld';
+import { CITY_THEMES } from '../world/TimeOfDay';
+import { SeededRandom } from '../core/SeededRandom';
 import type { InputState } from '../core/InputManager';
 import { settings, type GraphicsQuality } from '../core/Settings';
 
@@ -24,25 +27,59 @@ const START_POS = new THREE.Vector3(0, 0.94, 25);
 const START_QUAT = new THREE.Quaternion(0, 0, 0, 1);
 
 export class RaceSystem {
+  gameMode: GameMode = GameMode.RACE;
   gameState: GameState = GameState.MENU;
   previousState: GameState = GameState.MENU;
   countdownTimer = 3.0; // 3-2-1-GO!
 
+  readonly scene: THREE.Scene;
+  readonly renderer: THREE.WebGLRenderer;
+  readonly vehicleSystem: VehicleSystem;
+  readonly hudSystem: HudSystem;
+  readonly composer?: EffectComposer;
+
+  worldSystem: WorldSystem | null = null;
+  roamWorld: RoamWorld | null = null;
+
   constructor(
-    readonly worldSystem: WorldSystem,
-    readonly vehicleSystem: VehicleSystem,
-    readonly hudSystem: HudSystem,
-    readonly renderer: THREE.WebGLRenderer,
-    readonly composer?: EffectComposer
+    sceneOrWorld: THREE.Scene | WorldSystem,
+    rendererOrVehicles: THREE.WebGLRenderer | VehicleSystem,
+    vehicleOrHud: VehicleSystem | HudSystem,
+    hudOrRenderer: HudSystem | THREE.WebGLRenderer,
+    composer?: EffectComposer
   ) {
+    if ('scene' in sceneOrWorld && 'track' in sceneOrWorld) {
+      // Legacy signature: (worldSystem, vehicleSystem, hudSystem, renderer, composer)
+      this.worldSystem = sceneOrWorld as WorldSystem;
+      this.scene = this.worldSystem.scene;
+      this.vehicleSystem = rendererOrVehicles as VehicleSystem;
+      this.hudSystem = vehicleOrHud as HudSystem;
+      this.renderer = hudOrRenderer as THREE.WebGLRenderer;
+      this.composer = composer;
+    } else {
+      // Primary signature: (scene, renderer, vehicleSystem, hudSystem, composer)
+      this.scene = sceneOrWorld as THREE.Scene;
+      this.renderer = rendererOrVehicles as THREE.WebGLRenderer;
+      this.vehicleSystem = vehicleOrHud as VehicleSystem;
+      this.hudSystem = hudOrRenderer as HudSystem;
+      this.composer = composer;
+    }
+
     // 1. Wire Main Menu callbacks
     this.hudSystem.mainMenu.onPlay = () => this.startRaceWithWarmUp();
+    this.hudSystem.mainMenu.onRoam = () => this.startRoam();
     this.hudSystem.mainMenu.onSettings = () => this.hudSystem.settingsModal.show();
     this.hudSystem.mainMenu.onControls = () => this.hudSystem.controlsModal.show();
 
     // 2. Wire Pause Menu callbacks
     this.hudSystem.pauseMenu.onResume = () => this.resume();
-    this.hudSystem.pauseMenu.onRestart = () => this.restartRace();
+    this.hudSystem.pauseMenu.onRestart = () => {
+      if (this.gameMode === GameMode.ROAM) {
+        this.respawnRoam();
+      } else {
+        this.restartRace();
+      }
+    };
     this.hudSystem.pauseMenu.onSettings = () => this.hudSystem.settingsModal.show();
     this.hudSystem.pauseMenu.onQuit = () => this.goToMenu();
 
@@ -58,8 +95,18 @@ export class RaceSystem {
     };
 
     // 5. Wire In-Game HUD callbacks
-    this.hudSystem.raceHUD.onRestartRace = () => this.restartRace();
-    this.hudSystem.raceHUD.onRemixCity = () => this.remixCity();
+    this.hudSystem.raceHUD.onRestartRace = () => {
+      if (this.gameMode === GameMode.ROAM) {
+        this.respawnRoam();
+      } else {
+        this.restartRace();
+      }
+    };
+    this.hudSystem.raceHUD.onRemixCity = () => {
+      if (this.gameMode === GameMode.RACE) {
+        this.remixCity();
+      }
+    };
 
     // 6. Escape key listener for clean modal closing and pausing
     window.addEventListener('keydown', e => {
@@ -72,7 +119,11 @@ export class RaceSystem {
           this.hudSystem.controlsModal.hide();
         } else if (this.gameState === GameState.PAUSED) {
           this.resume();
-        } else if (this.gameState === GameState.RACING || this.gameState === GameState.COUNTDOWN) {
+        } else if (
+          this.gameState === GameState.RACING ||
+          this.gameState === GameState.COUNTDOWN ||
+          this.gameState === GameState.ROAMING
+        ) {
           this.pause();
         }
       }
@@ -84,6 +135,41 @@ export class RaceSystem {
 
     // Start in Main Menu
     this.goToMenu();
+  }
+
+  ensureRaceWorld(): WorldSystem {
+    if (this.roamWorld) {
+      this.roamWorld.removeFromScene(this.scene);
+    }
+    if (!this.worldSystem) {
+      this.worldSystem = new WorldSystem(this.scene, this.renderer);
+    } else {
+      this.scene.add(this.worldSystem.track.group);
+      this.scene.add(this.worldSystem.city.visualGroup);
+      this.scene.add(this.worldSystem.inversion.visualGroup);
+      this.scene.add(this.worldSystem.sunLight);
+      this.scene.add(this.worldSystem.hemiLight);
+      this.scene.add(this.worldSystem.fillLight);
+      this.worldSystem.applyTheme(this.worldSystem.currentTheme, this.renderer);
+    }
+    return this.worldSystem;
+  }
+
+  ensureRoamWorld(): RoamWorld {
+    if (this.worldSystem) {
+      this.scene.remove(this.worldSystem.track.group);
+      this.scene.remove(this.worldSystem.city.visualGroup);
+      this.scene.remove(this.worldSystem.inversion.visualGroup);
+      this.scene.remove(this.worldSystem.sunLight);
+      this.scene.remove(this.worldSystem.hemiLight);
+      this.scene.remove(this.worldSystem.fillLight);
+    }
+    if (!this.roamWorld) {
+      this.roamWorld = new RoamWorld(this.scene, this.renderer);
+    }
+    this.roamWorld.addToScene(this.scene);
+    this.roamWorld.applyAtmosphere(this.renderer);
+    return this.roamWorld;
   }
 
   setGameState(newState: GameState): void {
@@ -98,9 +184,11 @@ export class RaceSystem {
     }
 
     if (newState === GameState.MENU) {
+      const seed = this.worldSystem ? this.worldSystem.currentSeed : SeededRandom.getDailySeed();
+      const themeName = this.worldSystem ? this.worldSystem.currentTheme.name : CITY_THEMES[0].name;
       this.hudSystem.mainMenu.updateInfo(
-        this.worldSystem.currentSeed,
-        this.worldSystem.currentTheme.name,
+        seed,
+        themeName,
         settings.data.bestTotalTime
       );
       this.hudSystem.mainMenu.show();
@@ -116,7 +204,11 @@ export class RaceSystem {
   togglePause(): void {
     if (this.gameState === GameState.PAUSED) {
       this.resume();
-    } else if (this.gameState === GameState.RACING || this.gameState === GameState.COUNTDOWN) {
+    } else if (
+      this.gameState === GameState.RACING ||
+      this.gameState === GameState.COUNTDOWN ||
+      this.gameState === GameState.ROAMING
+    ) {
       this.pause();
     }
   }
@@ -126,6 +218,10 @@ export class RaceSystem {
   }
 
   resume(): void {
+    if (this.gameMode === GameMode.ROAM) {
+      this.setGameState(GameState.ROAMING);
+      return;
+    }
     const resumeTo = (this.previousState === GameState.RACING || this.previousState === GameState.COUNTDOWN)
       ? this.previousState
       : GameState.RACING;
@@ -140,29 +236,70 @@ export class RaceSystem {
     this.hudSystem.controlsModal.hide();
     this.hudSystem.raceHUD.hide();
 
+    const seed = this.worldSystem ? this.worldSystem.currentSeed : SeededRandom.getDailySeed();
+    const themeName = this.worldSystem ? this.worldSystem.currentTheme.name : CITY_THEMES[0].name;
+
     this.hudSystem.mainMenu.updateInfo(
-      this.worldSystem.currentSeed,
-      this.worldSystem.currentTheme.name,
+      seed,
+      themeName,
       settings.data.bestTotalTime
     );
     this.hudSystem.mainMenu.show();
   }
 
   /**
+   * Starts Free Roam sandbox mode.
+   */
+  startRoam(): void {
+    this.gameMode = GameMode.ROAM;
+    this.hudSystem.raceHUD.setMode(GameMode.ROAM);
+
+    this.hudSystem.mainMenu.hide();
+    this.hudSystem.pauseMenu.hide();
+    this.hudSystem.resultsModal.hide();
+    this.hudSystem.settingsModal.close();
+    this.hudSystem.controlsModal.hide();
+
+    // Ensure Roam World scene is mounted
+    this.ensureRoamWorld();
+
+    // Reset vehicle and camera at Roam spawn point
+    this.vehicleSystem.resetAll(ROAM_SPAWN_POS, ROAM_SPAWN_QUAT);
+
+    this.setGameState(GameState.ROAMING);
+  }
+
+  /**
+   * Respawns car at Free Roam spawn point.
+   */
+  respawnRoam(): void {
+    this.vehicleSystem.respawnRoam();
+    if (this.gameState === GameState.PAUSED) {
+      this.resume();
+    }
+  }
+
+  /**
    * Starts race from Main Menu with GPU shader warm-up.
    */
   async startRaceWithWarmUp(): Promise<void> {
+    this.gameMode = GameMode.RACE;
+    this.hudSystem.raceHUD.setMode(GameMode.RACE);
+
     this.hudSystem.mainMenu.hide();
     this.hudSystem.settingsModal.close();
     this.hudSystem.controlsModal.hide();
 
+    const ws = this.ensureRaceWorld();
+    this.vehicleSystem.initRaceGhosts();
+
     this.vehicleSystem.resetAll(START_POS, START_QUAT);
-    this.worldSystem.track.resetCheckpoints();
+    ws.track.resetCheckpoints();
 
     // 1. Warm-up GPU shaders and compile materials
     await this.hudSystem.loadingScreen.warmUp(
       this.renderer,
-      this.worldSystem.scene,
+      ws.scene,
       this.vehicleSystem.chaseCamera.camera
     );
 
@@ -170,44 +307,62 @@ export class RaceSystem {
     this.countdownTimer = 3.0;
     this.setGameState(GameState.COUNTDOWN);
 
-    this.vehicleSystem.ghostRecorder.startLap();
-    this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
+    if (this.vehicleSystem.ghostRecorder) {
+      this.vehicleSystem.ghostRecorder.startLap();
+      if (this.vehicleSystem.ghostModel) {
+        this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
+      }
+    }
   }
 
   /**
-   * Unified reset: restores vehicles, checkpoints, timers, and cameras through one single pipeline.
+   * Unified reset for race or roam.
    */
   restartRace(): void {
+    if (this.gameMode === GameMode.ROAM) {
+      this.respawnRoam();
+      return;
+    }
+
     this.hudSystem.mainMenu.hide();
     this.hudSystem.pauseMenu.hide();
     this.hudSystem.resultsModal.hide();
     this.hudSystem.settingsModal.close();
     this.hudSystem.controlsModal.hide();
 
+    const ws = this.ensureRaceWorld();
+    this.vehicleSystem.initRaceGhosts();
+
     this.vehicleSystem.resetAll(START_POS, START_QUAT);
-    this.worldSystem.track.resetCheckpoints();
+    ws.track.resetCheckpoints();
 
     this.countdownTimer = 3.0;
     this.setGameState(GameState.COUNTDOWN);
 
-    this.vehicleSystem.ghostRecorder.startLap();
-    this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
+    if (this.vehicleSystem.ghostRecorder) {
+      this.vehicleSystem.ghostRecorder.startLap();
+      if (this.vehicleSystem.ghostModel) {
+        this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
+      }
+    }
   }
 
   async remixCity(): Promise<void> {
-    this.worldSystem.remixCity(this.renderer);
+    if (this.gameMode !== GameMode.RACE) return;
+    const ws = this.ensureRaceWorld();
+    ws.remixCity(this.renderer);
     this.hudSystem.raceHUD.setSeedBadge(
-      this.worldSystem.currentSeed,
-      this.worldSystem.currentTheme.name,
-      this.worldSystem.isDaily
+      ws.currentSeed,
+      ws.currentTheme.name,
+      ws.isDaily
     );
 
     this.applyGraphicsQuality(settings.data.graphicsQuality);
 
     if (this.gameState === GameState.MENU) {
       this.hudSystem.mainMenu.updateInfo(
-        this.worldSystem.currentSeed,
-        this.worldSystem.currentTheme.name,
+        ws.currentSeed,
+        ws.currentTheme.name,
         settings.data.bestTotalTime
       );
     } else {
@@ -219,18 +374,20 @@ export class RaceSystem {
    * Applies graphics quality preset to renderer, shadows, bloom, and resolution scale.
    */
   applyGraphicsQuality(quality: GraphicsQuality): void {
-    const sun = this.worldSystem.sunLight;
+    const sun = this.worldSystem ? this.worldSystem.sunLight : (this.roamWorld ? this.roamWorld.sunLight : null);
     const bloomPass = (this.composer as any)?.bloomPass;
 
     switch (quality) {
       case 'high':
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        sun.castShadow = true;
-        sun.shadow.mapSize.set(2048, 2048);
-        if (sun.shadow.map) {
-          sun.shadow.map.dispose();
-          sun.shadow.map = null;
+        if (sun) {
+          sun.castShadow = true;
+          sun.shadow.mapSize.set(2048, 2048);
+          if (sun.shadow.map) {
+            sun.shadow.map.dispose();
+            sun.shadow.map = null;
+          }
         }
         if (bloomPass) bloomPass.enabled = true;
         if (typeof window !== 'undefined') {
@@ -241,11 +398,13 @@ export class RaceSystem {
       case 'medium':
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
-        sun.castShadow = true;
-        sun.shadow.mapSize.set(1024, 1024);
-        if (sun.shadow.map) {
-          sun.shadow.map.dispose();
-          sun.shadow.map = null;
+        if (sun) {
+          sun.castShadow = true;
+          sun.shadow.mapSize.set(1024, 1024);
+          if (sun.shadow.map) {
+            sun.shadow.map.dispose();
+            sun.shadow.map = null;
+          }
         }
         if (bloomPass) bloomPass.enabled = true;
         if (typeof window !== 'undefined') {
@@ -255,7 +414,7 @@ export class RaceSystem {
 
       case 'low':
         this.renderer.shadowMap.enabled = false;
-        sun.castShadow = false;
+        if (sun) sun.castShadow = false;
         if (bloomPass) bloomPass.enabled = false;
         this.renderer.setPixelRatio(0.75);
         break;
@@ -263,13 +422,28 @@ export class RaceSystem {
   }
 
   /**
-   * Fixed 120Hz physics update for race lifecycle.
+   * Fixed 120Hz physics update for active lifecycle.
    */
   updatePhysics(dt: number, input: InputState): void {
     // 0. Frozen while paused or in main menu
     if (this.gameState === GameState.PAUSED || this.gameState === GameState.MENU) return;
 
-    // 1. Staging Countdown
+    // ── 1. Free Roam Physics ──
+    if (this.gameMode === GameMode.ROAM) {
+      if (this.gameState === GameState.ROAMING && this.roamWorld) {
+        this.vehicleSystem.updatePhysics(dt, input, this.roamWorld);
+        const player = this.vehicleSystem.playerVehicle;
+        if (player.controller.position.y < -50) {
+          this.respawnRoam();
+        }
+      }
+      return;
+    }
+
+    // ── 2. Active Race Physics ──
+    if (!this.worldSystem) return;
+
+    // Staging Countdown
     if (this.gameState === GameState.COUNTDOWN) {
       this.countdownTimer -= dt;
       if (this.countdownTimer <= 0) {
@@ -284,7 +458,6 @@ export class RaceSystem {
       this.countdownTimer -= dt;
     }
 
-    // 2. Active Racing Physics
     if (this.gameState === GameState.RACING) {
       this.vehicleSystem.updatePhysics(
         dt,
@@ -299,7 +472,7 @@ export class RaceSystem {
         v.progress.currentLapTime += dt;
         v.progress.totalRaceTime += dt;
 
-        if (v.isPlayer) {
+        if (v.isPlayer && this.vehicleSystem.ghostRecorder) {
           this.vehicleSystem.ghostRecorder.recordFrame(v.controller.position, v.controller.quaternion);
 
           // Boost refill notification
@@ -340,7 +513,9 @@ export class RaceSystem {
 
             let isRecord = false;
             if (v.isPlayer) {
-              isRecord = this.vehicleSystem.ghostRecorder.finishLap(v.progress.currentLapTime);
+              if (this.vehicleSystem.ghostRecorder) {
+                isRecord = this.vehicleSystem.ghostRecorder.finishLap(v.progress.currentLapTime);
+              }
               const m = Math.floor(v.progress.currentLapTime / 60);
               const s = (v.progress.currentLapTime % 60).toFixed(2).padStart(5, '0');
               const timeStr = `${m}:${s}`;
@@ -356,7 +531,7 @@ export class RaceSystem {
                 this.hudSystem.resultsModal.showResults(
                   v.progress.totalRaceTime,
                   v.progress.lapTimes,
-                  this.vehicleSystem.ghostRecorder.bestLapTime,
+                  this.vehicleSystem.ghostRecorder ? this.vehicleSystem.ghostRecorder.bestLapTime : null,
                   this.worldSystem.currentSeed
                 );
               }
@@ -367,8 +542,12 @@ export class RaceSystem {
               v.progress.activeCheckpointIndex = 1;
               if (v.isPlayer) {
                 this.worldSystem.track.resetCheckpoints();
-                this.vehicleSystem.ghostRecorder.startLap();
-                this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
+                if (this.vehicleSystem.ghostRecorder) {
+                  this.vehicleSystem.ghostRecorder.startLap();
+                  if (this.vehicleSystem.ghostModel) {
+                    this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
+                  }
+                }
               }
             }
           }

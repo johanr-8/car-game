@@ -13,7 +13,7 @@ import { ArcadeCarController } from './ArcadeCarController';
 import { CarModel } from './CarModel';
 import { BoostSystem } from './BoostSystem';
 import type { InputState } from '../core/InputManager';
-import type { CollisionWorld } from '../world/CollisionWorld';
+import type { SurfaceProvider } from '../world/SurfaceProvider';
 
 export interface RaceProgress {
   activeCheckpointIndex: number;
@@ -102,7 +102,7 @@ export class VehicleEntity {
   /**
    * 120Hz fixed-timestep physics update.
    */
-  updatePhysics(dt: number, input: InputState, collision: CollisionWorld): void {
+  updatePhysics(dt: number, input: InputState, collision: SurfaceProvider): void {
     // 1. Kinetic Boost Update
     const { isBoosting, boostForce } = this.boost.update(
       dt,
@@ -127,7 +127,7 @@ export class VehicleEntity {
   /**
    * Staging standstill update during countdown.
    */
-  updateStaging(collision: CollisionWorld): void {
+  updateStaging(collision: SurfaceProvider): void {
     this.controller.updateStaging(collision);
   }
 
