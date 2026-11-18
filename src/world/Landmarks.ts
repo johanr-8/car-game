@@ -56,8 +56,8 @@ export function createLandmarkDefs(chunkSize: number): LandmarkDef[] {
           emissiveIntensity: 1.0,
         });
 
-        // 1. Podium Base (44x44m, 24m high)
-        const podium = new THREE.Mesh(new THREE.BoxGeometry(44, 24, 44), darkSteelMat);
+        // 1. Podium Base (32x32m, 24m high)
+        const podium = new THREE.Mesh(new THREE.BoxGeometry(32, 24, 32), darkSteelMat);
         podium.position.set(32, baseH + 12, 32);
         podium.castShadow = true;
         podium.receiveShadow = true;
@@ -94,7 +94,7 @@ export function createLandmarkDefs(chunkSize: number): LandmarkDef[] {
       getSolidBoxes(terrainHeight: TerrainHeight): SolidBox[] {
         const baseH = terrainHeight.groundHeightAt(32, 32);
         return [
-          { x: 32, y: baseH + 12, z: 32, width: 44, height: 24, depth: 44 },
+          { x: 32, y: baseH + 12, z: 32, width: 32, height: 24, depth: 32 },
           { x: 32, y: baseH + 24 + 55, z: 32, width: 32, height: 110, depth: 32 },
           { x: 32, y: baseH + 134 + 25, z: 32, width: 20, height: 50, depth: 20 },
         ];

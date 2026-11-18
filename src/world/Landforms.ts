@@ -117,7 +117,7 @@ export class Landforms {
     const cfg = this.config;
 
     // ── 1. Coastline along West Edge ─────────────────────────
-    const coastX = cfg.coastStartX + 120 * Math.sin(z * 0.0022 + 0.4) + 65 * Math.cos(z * 0.0051);
+    const coastX = cfg.coastStartX + 75 * Math.sin(z * 0.0032 + 0.4) + 35 * Math.cos(z * 0.0075);
 
     // Seaward (West of coast) -> drops below sea level (y = 0)
     if (x < coastX) {
@@ -177,10 +177,11 @@ export class Landforms {
       h = (1 - lakeWeight) * h + lakeWeight * lakeProfile;
     }
 
-    // ── 6. Mountain Ridge with Peaks (~180m) & Mountain Pass (~48m) ─
-    // Ridge axis running from (450, 1350) to (1650, 450)
-    const ax = 450, az = 1350;
-    const bx = 1650, bz = 450;
+    // ── 6. Mountain Ridge with Peaks (~160m) & Mountain Pass (~42m) ─
+    // Ridge axis running in northeast quadrant
+    const scale = Math.min(1.0, this.spec.worldSize / 2000.0);
+    const ax = 320 * scale, az = 820 * scale;
+    const bx = 850 * scale, bz = 320 * scale;
     const abx = bx - ax;
     const abz = bz - az;
     const abLenSq = abx * abx + abz * abz;
@@ -190,7 +191,7 @@ export class Landforms {
     const projZ = az + tRidge * abz;
     const distRidge = Math.hypot(x - projX, z - projZ);
 
-    const ridgeWidth = 420.0;
+    const ridgeWidth = 280.0 * scale;
     if (distRidge < ridgeWidth) {
       const ridgeWeight = 1.0 - smoothstep(0.0, ridgeWidth, distRidge);
 
@@ -199,13 +200,13 @@ export class Landforms {
       const peakAmp = cfg.mountainPeakElevation - 28.0;
       let mountainH = 35.0 + ridgeWeight * (peakAmp + rNoise * 26.0);
 
-      // Mountain Pass near the center of the ridge: (1050, 900)
-      const passX = 1050, passZ = 900;
+      // Mountain Pass near the center of the ridge: (520, 560)
+      const passX = 520 * scale, passZ = 560 * scale;
       const distPass = Math.hypot(x - passX, z - passZ);
-      const passRadius = 240.0;
+      const passRadius = 180.0 * scale;
       if (distPass < passRadius) {
-        const passWeight = 1.0 - smoothstep(40.0, passRadius, distPass);
-        // Saddle elevation (~48m) with gentle drivable slopes
+        const passWeight = 1.0 - smoothstep(30.0, passRadius, distPass);
+        // Saddle elevation (~42m) with gentle drivable slopes
         const passH = cfg.mountainPassElevation + (n3 + n4) * 3.0;
         mountainH = (1 - passWeight) * mountainH + passWeight * passH;
       }
@@ -299,7 +300,7 @@ export class Landforms {
    * Dynamic x-coordinate of the sea coastline at a given z.
    */
   getCoastlineX(z: number): number {
-    return this.config.coastStartX + 120 * Math.sin(z * 0.0022 + 0.4) + 65 * Math.cos(z * 0.0051);
+    return this.config.coastStartX + 75 * Math.sin(z * 0.0032 + 0.4) + 35 * Math.cos(z * 0.0075);
   }
 
   /**

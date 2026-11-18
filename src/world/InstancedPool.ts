@@ -138,20 +138,29 @@ function createUnitHouseGeometry(): THREE.BufferGeometry {
 }
 
 function createTreeGeometry(): THREE.BufferGeometry {
-  // Trunk
-  const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 1.8, 6);
-  trunkGeo.translate(0, 0.9, 0);
+  const parts: THREE.BufferGeometry[] = [];
 
-  // Foliage cone 1 (lower)
-  const f1Geo = new THREE.ConeGeometry(1.6, 2.8, 6);
-  f1Geo.translate(0, 2.8, 0);
+  // Slender Dubai-style coastal palm trunk (5.2m tall)
+  const trunk = new THREE.CylinderGeometry(0.16, 0.26, 5.2, 7);
+  trunk.translate(0, 2.6, 0);
+  parts.push(trunk);
 
-  // Foliage cone 2 (upper)
-  const f2Geo = new THREE.ConeGeometry(1.2, 2.4, 6);
-  f2Geo.translate(0, 4.2, 0);
+  // Crown hub
+  const hub = new THREE.SphereGeometry(0.45, 6, 6);
+  hub.translate(0, 5.2, 0);
+  parts.push(hub);
 
-  // Merge geometries
-  return mergeBufferGeometries([trunkGeo, f1Geo, f2Geo]);
+  // 6 radiating palm fronds drooping gracefully
+  for (let f = 0; f < 6; f++) {
+    const angle = (f / 6) * Math.PI * 2;
+    const frond = new THREE.BoxGeometry(0.32, 0.06, 2.6);
+    frond.rotateX(-0.35); // drooping down
+    frond.rotateY(angle);
+    frond.translate(Math.sin(angle) * 1.1, 5.0, Math.cos(angle) * 1.1);
+    parts.push(frond);
+  }
+
+  return mergeBufferGeometries(parts);
 }
 
 function createStreetLampGeometry(): THREE.BufferGeometry {
@@ -365,8 +374,8 @@ export class CityPoolManager {
 
     // 2. Tree and Lamp materials
     const treeMat = new THREE.MeshStandardMaterial({
-      color: 0x245428,
-      roughness: 0.88,
+      color: 0x15803d, // Lush tropical palm green
+      roughness: 0.80,
       metalness: 0.05,
     });
 

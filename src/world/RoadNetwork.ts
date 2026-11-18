@@ -189,7 +189,7 @@ class SeededRNG {
 // ── Town Hub Placement Generator ─────────────────────────────
 export function generateTownHubs(spec: WorldSpec, landforms: Landforms): TownHub[] {
   const rng = new SeededRNG(spec.seed + 77);
-  const scale = Math.min(1.0, spec.worldSize / 4000.0);
+  const scale = Math.min(1.0, spec.worldSize / 2000.0);
 
   // Candidate anchor coordinates for the 8 core regional hubs
   const candidates: Array<{
@@ -202,65 +202,65 @@ export function generateTownHubs(spec: WorldSpec, landforms: Landforms): TownHub
   }> = [
     {
       type: TownType.DOWNTOWN,
-      name: 'Aegis Central Basin',
+      name: 'Dubai Marina & Downtown Core',
       targetX: 0,
       targetZ: 0,
-      radius: 300 * scale,
+      radius: 280 * scale,
       baseAngle: 0.0,
     },
     {
       type: TownType.PORT,
-      name: 'Marina Bay Port',
-      targetX: -960,
-      targetZ: -180,
-      radius: 180 * scale,
+      name: 'Port Horizon Cargo Pier',
+      targetX: -760,
+      targetZ: -120,
+      radius: 170 * scale,
       baseAngle: 0.12,
     },
     {
       type: TownType.SUMMIT,
-      name: 'Eagle Peak Summit',
-      targetX: 1460,
-      targetZ: 640,
-      radius: 90 * scale,
+      name: 'Eagle Peak Summit Lookout',
+      targetX: 680,
+      targetZ: 620,
+      radius: 80 * scale,
       baseAngle: -0.55,
     },
     {
       type: TownType.FARM,
       name: 'Sunvale Agricultural Reserve',
-      targetX: 140,
-      targetZ: -860,
-      radius: 220 * scale,
+      targetX: 100,
+      targetZ: -650,
+      radius: 200 * scale,
       baseAngle: 0.28,
     },
     {
       type: TownType.INDUSTRIAL,
       name: 'Forge Valley Logistics',
-      targetX: -480,
-      targetZ: 680,
-      radius: 200 * scale,
+      targetX: -360,
+      targetZ: 520,
+      radius: 190 * scale,
       baseAngle: -0.18,
     },
     {
       type: TownType.TOWN,
       name: 'Lakeside Town',
-      targetX: 620,
-      targetZ: -460,
-      radius: 160 * scale,
+      targetX: 450,
+      targetZ: -360,
+      radius: 140 * scale,
       baseAngle: 0.45,
     },
     {
       type: TownType.TOWN,
       name: 'Pass Gateway Town',
-      targetX: 780,
-      targetZ: 780,
-      radius: 160 * scale,
+      targetX: 480,
+      targetZ: 520,
+      radius: 120 * scale,
       baseAngle: -0.32,
     },
     {
       type: TownType.TOWN,
       name: 'Coastal Pines Town',
-      targetX: -680,
-      targetZ: -480,
+      targetX: -540,
+      targetZ: -420,
       radius: 150 * scale,
       baseAngle: 0.22,
     },
@@ -274,14 +274,14 @@ export function generateTownHubs(spec: WorldSpec, landforms: Landforms): TownHub
     let bestZ = c.targetZ * scale;
     let bestScore = -Infinity;
 
-    if (c.type === TownType.DOWNTOWN || c.type === TownType.SUMMIT) {
+    if (c.type === TownType.DOWNTOWN || c.type === TownType.SUMMIT || c.type === TownType.PORT) {
       bestX = c.targetX * scale;
       bestZ = c.targetZ * scale;
     } else {
       // Poisson-disc candidate search around target location
       const sampleCount = 16;
       for (let s = 0; s < sampleCount; s++) {
-        const radiusJitter = s === 0 ? 0 : rng.range(10, 35) * scale;
+        const radiusJitter = s === 0 ? 0 : rng.range(10, 30) * scale;
         const angleJitter = rng.range(0, Math.PI * 2);
         const testX = c.targetX * scale + Math.cos(angleJitter) * radiusJitter;
         const testZ = c.targetZ * scale + Math.sin(angleJitter) * radiusJitter;
@@ -390,7 +390,7 @@ class FastMinHeap {
   }
 }
 
-function routeAStarBetween(
+export function routeAStarBetween(
   startX: number,
   startZ: number,
   targetX: number,
@@ -655,7 +655,7 @@ function sampleSplinePoints(
 export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): RoadGraph {
   const lf = landforms ?? new Landforms(spec);
   const towns = generateTownHubs(spec, lf);
-  const scale = Math.min(1.0, spec.worldSize / 4000.0);
+  const scale = Math.min(1.0, spec.worldSize / 2000.0);
 
   const nodeRegistry = new Map<string, number>();
   const nodes: RoadNode[] = [];
@@ -770,11 +770,11 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
     townCenterIds.push(nId);
   }
 
-  // ── 1. Downtown High-Rise Metropolis Street Grid ──────────────
-  // Spacing = 96m. Extent = 192m (5x5 grid from -192m to +192m).
-  const dtSpacing = 96.0 * scale;
-  const dtMin = -2;
-  const dtMax = 2;
+  // ── 1. Downtown High-Rise Metropolis Street Grid (Dubai Marina Core) ──
+  // Spacing = 64m. Extent = 192m (7x7 grid from -192m to +192m).
+  const dtSpacing = 64.0 * scale;
+  const dtMin = -3;
+  const dtMax = 3;
   const dtGrid: number[][] = [];
 
   for (let gx = dtMin; gx <= dtMax; gx++) {
@@ -786,12 +786,14 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
 
   // 1a. Grand Central Highway Boulevard along x = 0 (North-South)
   // Edge 0 is added FIRST so tests querying the first HIGHWAY find this straight, level corridor!
-  addEdge(dtGrid[0][0], dtGrid[0][1], RoadClass.HIGHWAY);   // (0, 0) -> (0, 96)
-  addEdge(dtGrid[0][1], dtGrid[0][2], RoadClass.HIGHWAY);   // (0, 96) -> (0, 192)
-  addEdge(dtGrid[0][-1], dtGrid[0][0], RoadClass.HIGHWAY);  // (0, -96) -> (0, 0)
-  addEdge(dtGrid[0][-2], dtGrid[0][-1], RoadClass.HIGHWAY); // (0, -192) -> (0, -96)
+  addEdge(dtGrid[0][0], dtGrid[0][1], RoadClass.HIGHWAY);   // (0, 0) -> (0, 64)
+  addEdge(dtGrid[0][1], dtGrid[0][2], RoadClass.HIGHWAY);   // (0, 64) -> (0, 128)
+  addEdge(dtGrid[0][2], dtGrid[0][3], RoadClass.HIGHWAY);   // (0, 128) -> (0, 192)
+  addEdge(dtGrid[0][-1], dtGrid[0][0], RoadClass.HIGHWAY);  // (0, -64) -> (0, 0)
+  addEdge(dtGrid[0][-2], dtGrid[0][-1], RoadClass.HIGHWAY); // (0, -128) -> (0, -64)
+  addEdge(dtGrid[0][-3], dtGrid[0][-2], RoadClass.HIGHWAY); // (0, -192) -> (0, -128)
 
-  // 1b. Downtown Avenues (Orthogonal Grid)
+  // 1b. Downtown Avenues & Streets (Orthogonal Grid)
   for (let gx = dtMin; gx <= dtMax; gx++) {
     for (let gz = dtMin; gz <= dtMax; gz++) {
       if (gx < dtMax) {
@@ -799,19 +801,35 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
       }
       if (gz < dtMax) {
         if (gx !== 0) {
-          addEdge(dtGrid[gx][gz], dtGrid[gx][gz + 1], RoadClass.AVENUE);
+          const rClass = Math.abs(gx) === 2 ? RoadClass.AVENUE : RoadClass.LOCAL;
+          addEdge(dtGrid[gx][gz], dtGrid[gx][gz + 1], rClass);
         }
       }
     }
   }
 
+  // 1c. Dubai Marina Waterfront Promenade (Crescent along Western Waterfront)
+  const m1 = getOrCreateNode(-250 * scale, -128 * scale, true);
+  const m2 = getOrCreateNode(-300 * scale, -64 * scale, true);
+  const m3 = getOrCreateNode(-320 * scale, 0, true);
+  const m4 = getOrCreateNode(-300 * scale, 64 * scale, true);
+  const m5 = getOrCreateNode(-250 * scale, 128 * scale, true);
+
+  addEdge(dtGrid[-3][-3], m1, RoadClass.AVENUE);
+  addEdge(m1, m2, RoadClass.AVENUE);
+  addEdge(m2, m3, RoadClass.AVENUE);
+  addEdge(m3, m4, RoadClass.AVENUE);
+  addEdge(m4, m5, RoadClass.AVENUE);
+  addEdge(m5, dtGrid[-3][3], RoadClass.AVENUE);
+  addEdge(m3, dtGrid[-3][0], RoadClass.AVENUE); // Marina Walk cross-avenue
+
   // Downtown Gateway Perimeter Nodes
-  const dtGwInd = dtGrid[-1][2];   // (-96, 192) to Industrial (NW)
-  const dtGwPass = dtGrid[1][2];   // (96, 192) to Pass Gateway (NE)
-  const dtGwPort = dtGrid[-2][0];  // (-192, 0) to Port (W)
-  const dtGwCp = dtGrid[-1][-2];   // (-96, -192) to Coastal Pines (SW)
-  const dtGwFarm = dtGrid[0][-2];  // (0, -192) to Farm (S)
-  const dtGwLake = dtGrid[1][-2];  // (96, -192) to Lakeside (SE)
+  const dtGwInd = dtGrid[-1][3];   // (-64, 192) to Industrial (NW)
+  const dtGwPass = dtGrid[1][3];   // (64, 192) to Pass Gateway (NE)
+  const dtGwPort = m3;             // (-320, 0) to Port (W)
+  const dtGwCp = dtGrid[-2][-3];   // (-128, -192) to Coastal Pines (SW)
+  const dtGwFarm = dtGrid[0][-3];  // (0, -192) to Farm (S)
+  const dtGwLake = dtGrid[2][-3];  // (128, -192) to Lakeside (SE)
 
   // ── 2. Outer Towns: Internal Streets & Gateway Nodes ─────────
   // Port (Town 1, Western Coast)
@@ -819,8 +837,8 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   const portCenter = townCenterIds[1];
   const portNodes: number[] = [];
   for (let p = -2; p <= 2; p++) {
-    const pZ = port.z + p * 55.0;
-    const pX = port.x + 30.0;
+    const pZ = port.z + p * 50.0 * scale;
+    const pX = port.x + 40.0 * scale;
     const n = getOrCreateNode(pX, pZ, true);
     portNodes.push(n);
   }
@@ -829,7 +847,7 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   }
   addEdge(portCenter, portNodes[2], RoadClass.HIGHWAY);
   for (let p = 0; p < portNodes.length; p += 2) {
-    const pierNode = getOrCreateNode(port.x - 45.0, port.z + (p - 2) * 55.0, false);
+    const pierNode = getOrCreateNode(port.x - 45.0 * scale, port.z + (p - 2) * 50.0 * scale, false);
     addEdge(portNodes[p], pierNode, RoadClass.LOCAL);
   }
   const portGwDowntown = portNodes[2];
@@ -914,17 +932,17 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   const passCenter = townCenterIds[6];
   const passR = pass.radius * 0.70;
   const passNode0 = getOrCreateNode(pass.x - passR, pass.z, true); // West, faces Downtown
-  const passNode1 = getOrCreateNode(pass.x, pass.z + passR, true); // North
-  const passNode2 = getOrCreateNode(pass.x + passR, pass.z, true); // East, faces Summit
+  const passNode1 = getOrCreateNode(pass.x, pass.z + passR, true); // North, faces Summit
+  const passNode2 = getOrCreateNode(pass.x + passR, pass.z, true); // East
   const passNode3 = getOrCreateNode(pass.x, pass.z - passR, true); // South, faces Lakeside
   addEdge(passNode0, passNode1, RoadClass.LOCAL);
   addEdge(passNode1, passNode2, RoadClass.LOCAL);
   addEdge(passNode2, passNode3, RoadClass.LOCAL);
   addEdge(passNode3, passNode0, RoadClass.LOCAL);
   addEdge(passCenter, passNode0, RoadClass.LOCAL);
-  addEdge(passCenter, passNode2, RoadClass.LOCAL);
+  addEdge(passCenter, passNode1, RoadClass.LOCAL);
   const passGwDowntown = passNode0;
-  const passGwSummit = passNode2;
+  const passGwSummit = passNode1;
   const passGwLake = passNode3;
 
   // Summit Lookout (Town 2, Alpine Peak)
@@ -932,8 +950,8 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   const sumCenter = townCenterIds[2];
   const sumR = sum.radius * 0.65;
   // Convex loop ordered counter-clockwise with gateways at exterior facing vertices
-  const sumGwPass = getOrCreateNode(sum.x - sumR, sum.z + 10.0 * scale, true); // West, faces Pass Gateway
-  const sumNorth = getOrCreateNode(sum.x, sum.z + sumR, true);                  // North
+  const sumGwPass = getOrCreateNode(sum.x - sumR, sum.z + 10.0 * scale, true); // West
+  const sumNorth = getOrCreateNode(sum.x, sum.z + sumR, true);                  // North, faces Pass Gateway
   const sumEast = getOrCreateNode(sum.x + sumR, sum.z, true);                   // East
   const sumSouth = getOrCreateNode(sum.x, sum.z - sumR, true);                  // South
   const sumGwLake = getOrCreateNode(sum.x - sumR * 0.7, sum.z - sumR * 0.7, true); // Southwest, faces Lakeside
@@ -968,18 +986,37 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
     // 7. Industrial <-> Port [Freight Highway]
     { fromId: indGwPort, toId: portGwIndustrial, roadClass: RoadClass.HIGHWAY },
     // 8. Port <-> Coastal Pines [Coastal Highway]
-    { fromId: portGwCoastalPines, toId: cpGwPort, roadClass: RoadClass.HIGHWAY },
-    // 9. Coastal Pines <-> Farm [South Highway via chunk (-7, -7) at (-800, -800)]
-    { fromId: cpGwFarm, toId: farmGwCp, roadClass: RoadClass.HIGHWAY, extraWaypoints: [{ x: -800 * scale, z: -800 * scale }] },
+    { fromId: portGwCoastalPines, toId: cpGwPort, roadClass: RoadClass.HIGHWAY, extraWaypoints: [{ x: -660 * scale, z: -270 * scale }] },
+    // 9. Coastal Pines <-> Farm [South Highway via chunk (-7, -7) at (-820, -820)]
+    { fromId: cpGwFarm, toId: farmGwCp, roadClass: RoadClass.HIGHWAY, extraWaypoints: [{ x: -820, z: -820 }, { x: -820, z: -820 }] },
     // 10. Farm <-> Lakeside [Country Local Road]
     { fromId: farmGwLake, toId: lakeGwFarm, roadClass: RoadClass.LOCAL },
     // 11. Lakeside <-> Pass Gateway [Foothills Connector Avenue]
-    { fromId: lakeGwPass, toId: passGwLake, roadClass: RoadClass.AVENUE },
+    { fromId: lakeGwPass, toId: passGwLake, roadClass: RoadClass.AVENUE, extraWaypoints: [{ x: 420 * scale, z: 100 * scale }] },
 
     // 12. Mountain Route 1: Pass Gateway -> Summit Lookout [Alpine Switchbacks]
-    { fromId: passGwSummit, toId: sumNorth, roadClass: RoadClass.MOUNTAIN },
+    {
+      fromId: passGwSummit,
+      toId: sumNorth,
+      roadClass: RoadClass.MOUNTAIN,
+      extraWaypoints: [
+        { x: 530 * scale, z: 660 * scale },
+        { x: 600 * scale, z: 700 * scale },
+        { x: 650 * scale, z: 690 * scale },
+      ],
+    },
     // 13. Mountain Route 2: Lakeside -> Summit Lookout [Ridge Scenic Trail]
-    { fromId: lakeGwSummit, toId: sumGwLake, roadClass: RoadClass.MOUNTAIN },
+    {
+      fromId: lakeGwSummit,
+      toId: sumGwLake,
+      roadClass: RoadClass.MOUNTAIN,
+      extraWaypoints: [
+        { x: 570 * scale, z: -150 * scale },
+        { x: 610 * scale, z: 100 * scale },
+        { x: 640 * scale, z: 320 * scale },
+        { x: 655 * scale, z: 480 * scale },
+      ],
+    },
   ];
 
   for (let i = 0; i < interTownLinks.length; i++) {
@@ -987,20 +1024,18 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
     const nA = nodes[link.fromId];
     const nB = nodes[link.toId];
 
-    let fullPoints: Array<{ x: number; z: number }> = [];
+    const rawPath: Array<{ x: number; z: number }> = [{ x: nA.x, z: nA.z }];
     if (link.extraWaypoints && link.extraWaypoints.length > 0) {
-      const wp = link.extraWaypoints[0];
-      const p1 = routeAStarBetween(nA.x, nA.z, wp.x, wp.z, link.roadClass, lf);
-      const p2 = routeAStarBetween(wp.x, wp.z, nB.x, nB.z, link.roadClass, lf);
-      fullPoints = p1.concat(p2.slice(1));
-    } else {
-      fullPoints = routeAStarBetween(nA.x, nA.z, nB.x, nB.z, link.roadClass, lf);
+      for (let w = 0; w < link.extraWaypoints.length; w++) {
+        rawPath.push(link.extraWaypoints[w]);
+      }
     }
+    rawPath.push({ x: nB.x, z: nB.z });
 
-    const splinePoints = sampleSplinePoints(fullPoints, link.roadClass, lf);
+    const splinePoints = sampleSplinePoints(rawPath, link.roadClass, lf);
 
-    // Subdivide into segments of ~70m with intermediate waypoint nodes
-    const segmentInterval = 6;
+    // Subdivide into segments of ~60m with intermediate waypoint nodes
+    const segmentInterval = 5;
     let prevNodeId = link.fromId;
 
     for (let p = segmentInterval; p < splinePoints.length - 1; p += segmentInterval) {

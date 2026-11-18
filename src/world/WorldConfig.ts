@@ -54,21 +54,21 @@ export interface MacroLandformConfig {
 
 export const DEFAULT_MACRO_LANDFORMS: MacroLandformConfig = {
   seaLevel: 0.0,
-  coastStartX: -1050.0,
-  coastEndX: -1800.0,
+  coastStartX: -780.0,
+  coastEndX: -1200.0,
   oceanFloorDepth: -18.0,
-  cityBasinRadius: 650.0,
-  cityBasinElevation: 10.0,
-  mountainPeakElevation: 180.0,
-  mountainPassElevation: 48.0,
-  lakeCenter: { x: 320.0, z: -760.0 },
-  lakeRadius: 260.0,
+  cityBasinRadius: 480.0,
+  cityBasinElevation: 8.0,
+  mountainPeakElevation: 160.0,
+  mountainPassElevation: 42.0,
+  lakeCenter: { x: 280.0, z: -580.0 },
+  lakeRadius: 180.0,
   lakeSurfaceElevation: 8.0,
-  lakeBedElevation: 4.0,
+  lakeBedElevation: 3.0,
 };
 
 export const DEFAULT_WORLD_SPEC: WorldSpec = {
-  worldSize: 4000,
+  worldSize: 2000,
   chunkSize: 128,
   seed: 4242,
   loadRadius: 5,

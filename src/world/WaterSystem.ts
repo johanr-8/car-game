@@ -89,20 +89,20 @@ export class WaterSystem {
           vec3 baseWater = mix(uShallowColor, uDeepColor, 0.60);
           vec3 finalColor = mix(baseWater, uFoamColor, foam * 0.45) + vec3(spec);
 
-          gl_FragColor = vec4(finalColor, 0.82);
+          gl_FragColor = vec4(finalColor, 0.88);
         }
       `,
       transparent: true,
       side: THREE.DoubleSide,
-      depthWrite: false,
+      depthWrite: true,
     });
 
     // ── 2. Sea Plane at y = 0 along Coastline ─────────────────
-    // Spans from x = -2400 to x = -950 (width 1450m), z = [-2400, 2400] (height 4800m)
-    const seaGeo = new THREE.PlaneGeometry(1450, 4800, 36, 96);
+    // Spans from x = -1600 to x = -700 (width 900m), z = [-1300, 1300] (height 2600m)
+    const seaGeo = new THREE.PlaneGeometry(900, 2600, 36, 64);
     this.seaMesh = new THREE.Mesh(seaGeo, this.waterMat);
     this.seaMesh.rotation.x = -Math.PI * 0.5;
-    this.seaMesh.position.set(-1675, cfg.seaLevel, 0);
+    this.seaMesh.position.set(-1150, cfg.seaLevel, 0);
     this.seaMesh.receiveShadow = true;
     this.rootGroup.add(this.seaMesh);
 

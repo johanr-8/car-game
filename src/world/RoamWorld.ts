@@ -29,12 +29,12 @@ import { WaterSystem } from './WaterSystem';
 const _scratchSolidPoint = new THREE.Vector3();
 const _scratchSolidNormal = new THREE.Vector3();
 
-// Coastal Meadow Spawn Point: Spawns on a flat, lush meadow overlooking the western ocean
-export const ROAM_SPAWN_POS = new THREE.Vector3(-960, 22.0, -320);
-// Heading East/Inland towards the city basin
+// Grand Central Boulevard Spawn Point: Spawns directly on the straight highway corridor in the city basin
+export const ROAM_SPAWN_POS = new THREE.Vector3(0, 8.0 + 0.34, 32);
+// Heading North along Grand Central Boulevard
 export const ROAM_SPAWN_QUAT = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(0, 1, 0),
-  -Math.PI * 0.5
+  0.0
 );
 
 export class RoamWorld implements SurfaceProvider {

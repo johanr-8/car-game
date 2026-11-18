@@ -167,15 +167,25 @@ export class CityPropsGenerator {
     const originX = cx * chunkSize;
     const originZ = cz * chunkSize;
 
-    // Grid spacing based on district footprint
-    const step = district.type === DistrictType.SUBURBAN ? 24 : district.type === DistrictType.INDUSTRIAL ? 48 : 36;
-    const margin = 16;
+    // Dense grid spacing based on district footprint (ensures rich streetscape)
+    const step = district.type === DistrictType.SUBURBAN ? 22 : district.type === DistrictType.INDUSTRIAL ? 40 : 28;
+    const margin = 14;
 
     for (let x = originX + margin; x <= originX + chunkSize - margin; x += step) {
       for (let z = originZ + margin; z <= originZ + chunkSize - margin; z += step) {
         // Small organic jitter within lot cell
-        const lotX = x + rng.range(-3, 3);
-        const lotZ = z + rng.range(-3, 3);
+        const lotX = x + rng.range(-2.5, 2.5);
+        const lotZ = z + rng.range(-2.5, 2.5);
+
+        // Never place buildings underwater or in the ocean/lake
+        if (this.terrainHeight.landforms && this.terrainHeight.landforms.isUnderwater(lotX, lotZ)) {
+          continue;
+        }
+
+        // Keep 30m safe clearance around vehicle spawn point
+        if (Math.hypot(lotX, lotZ - 32) < 30) {
+          continue;
+        }
 
         // Clearance from landmarks
         if (landmark) {
@@ -188,10 +198,9 @@ export class CityPropsGenerator {
         if (!nearest) continue;
 
         // Size & Footprint
-        const isDowntown = district.type === DistrictType.DOWNTOWN;
         const lotSize = Math.round(rng.range(district.minLotSize, district.maxLotSize));
         const width = lotSize;
-        const depth = isDowntown ? lotSize : Math.round(rng.range(district.minLotSize, district.maxLotSize));
+        const depth = lotSize;
         const lotRadius = Math.hypot(width * 0.5, depth * 0.5);
 
         // Strict road clearance check:
@@ -207,16 +216,13 @@ export class CityPropsGenerator {
 
         // Ground elevation
         const groundY = this.terrainHeight.groundHeightAt(lotX, lotZ);
+        if (groundY <= 1.0) continue; // Never place at or below sea level
         const centerY = groundY + height * 0.5;
 
-        // Building orientation: face towards nearest road
+        // Building orientation: snap to nearest cardinal street axis
         const dx = nearest.projectedX - lotX;
         const dz = nearest.projectedZ - lotZ;
-        let rotY = Math.atan2(dx, dz);
-        if (isDowntown) {
-          // Snap Downtown high-rise orientation to orthogonal street grid
-          rotY = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? Math.PI * 0.5 : -Math.PI * 0.5) : (dz > 0 ? 0 : Math.PI);
-        }
+        const rotY = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? Math.PI * 0.5 : -Math.PI * 0.5) : (dz > 0 ? 0 : Math.PI);
 
         // Transformation matrix
         const mat = new THREE.Matrix4();
@@ -281,6 +287,9 @@ export class CityPropsGenerator {
       const tz = originZ + rng.range(8, chunkSize - 8);
 
       if (landmark && Math.hypot(tx - landmark.x, tz - landmark.z) < 40) continue;
+
+      // Never place trees underwater
+      if (this.terrainHeight.landforms && this.terrainHeight.landforms.isUnderwater(tx, tz)) continue;
 
       // Keep clearance from roads
       const nearest = this.roadIndex.getNearestRoad(tx, tz, 32);
@@ -379,7 +388,13 @@ export class CityPropsGenerator {
           continue; // REJECT: inside or too close to asphalt
         }
 
+        // Never place street lamps underwater
+        if (this.terrainHeight.landforms && this.terrainHeight.landforms.isUnderwater(lampX, lampZ)) {
+          continue;
+        }
+
         const lampY = this.terrainHeight.groundHeightAt(lampX, lampZ);
+        if (lampY <= 0.8) continue;
 
         // Rotate so lamp arm (+X in local geometry) points inward towards roadway center (-perpX, -perpZ)
         const rotY = Math.atan2(perpZ, -perpX);

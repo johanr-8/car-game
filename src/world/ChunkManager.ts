@@ -444,6 +444,11 @@ export class TerrainChunk {
             break;
         }
 
+        // Deep ocean/lake bed seabed color
+        if (landforms && landforms.isUnderwater(x, z)) {
+          r = 0.18; g = 0.28; b = 0.36;
+        }
+
         // Steeper slopes show rock / scree (slope > 25° starts rock, > 44° solid rock)
         if (_normalScratch.y < 0.90) {
           const rockWeight = Math.min(1.0, (0.90 - _normalScratch.y) / 0.18);
@@ -720,7 +725,14 @@ export class TerrainChunk {
           const czPoint = seg.z1 + t * dz;
 
           // Road centerline elevation
-          const roadY = terrainHeight.groundHeightAt(cxPoint, czPoint);
+          let roadY = terrainHeight.groundHeightAt(cxPoint, czPoint);
+          const landforms = terrainHeight.landforms;
+          if (landforms) {
+            const waterY = landforms.getWaterSurfaceY(cxPoint, czPoint);
+            if (waterY !== null && roadY <= waterY + 0.8) {
+              roadY = Math.max(roadY, waterY + 2.5); // Elevate road deck above water surface (bridge / pier)
+            }
+          }
           const swY = roadY + 0.04;
 
           const leftX = cxPoint - perpX * halfW;
