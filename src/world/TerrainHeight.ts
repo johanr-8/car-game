@@ -132,33 +132,36 @@ export class TerrainHeight {
     const rawH = this.rawTerrainHeight(x, z);
 
     // Query nearest road within road width + blend margin
-    const nearest = this.roadIndex.getNearestRoad(x, z, 36.0);
+    const nearest = this.roadIndex.getNearestRoad(x, z, 40.0);
     if (!nearest) return rawH;
 
     const d = nearest.distance;
     const w = nearest.roadHalfWidth;
 
-    const nA = this.graph.nodes[nearest.edge.fromNodeId];
-    const nB = this.graph.nodes[nearest.edge.toNodeId];
-    const elevA = nA.elevation !== undefined ? nA.elevation : rawH;
-    const elevB = nB.elevation !== undefined ? nB.elevation : rawH;
+    // Centerline road elevation following smooth terrain profile
+    const roadH = this.rawTerrainHeight(nearest.projectedX, nearest.projectedZ);
 
-    // Linear elevation profile along the road centerline
-    const roadH = (1 - nearest.t) * elevA + nearest.t * elevB;
-
-    // 1. Directly on road deck
+    // 1. Directly on road deck: +0.08m asphalt pavement thickness
     if (d <= w) {
-      return roadH;
+      return roadH + 0.08;
     }
 
-    // 2. Road shoulder / embankment transition (smoothstep blend)
-    if (d < w + this.blendMargin) {
-      const u = (d - w) / this.blendMargin;
+    // 2. Flat road shoulder / curb step (within 4m beyond asphalt edge)
+    const shoulderMargin = 4.0;
+    if (d <= w + shoulderMargin) {
+      // Smooth curb drop from asphalt surface down to grass/dirt shoulder
+      const curbT = Math.min(1.0, (d - w) / 0.8);
+      return roadH + 0.08 * (1 - curbT);
+    }
+
+    // 3. Embankment transition into natural rolling hills
+    if (d < w + shoulderMargin + this.blendMargin) {
+      const u = (d - (w + shoulderMargin)) / this.blendMargin;
       const k = u * u * (3 - 2 * u); // Cubic smoothstep
       return (1 - k) * roadH + k * rawH;
     }
 
-    // 3. Natural undulating hills
+    // 4. Natural undulating hills
     return rawH;
   }
 

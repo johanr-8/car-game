@@ -255,7 +255,18 @@ export class TerrainChunk {
       const z = originZ + j * step;
       for (let i = 0; i <= GRID_RES; i++) {
         const x = originX + i * step;
-        const y = terrainHeight.groundHeightAt(x, z);
+        let y = terrainHeight.groundHeightAt(x, z);
+
+        // Surface color blending based on road proximity and slope
+        const nearest = roadIndex.getNearestRoad(x, z, 24);
+
+        // Depress terrain mesh under asphalt ribbons to eliminate any clipping or overlapping
+        if (nearest && nearest.distance <= nearest.roadHalfWidth) {
+          y -= 0.16;
+        } else if (nearest && nearest.distance < nearest.roadHalfWidth + 1.5) {
+          const tEdge = (nearest.distance - nearest.roadHalfWidth) / 1.5;
+          y -= 0.16 * (1 - tEdge);
+        }
 
         pos[vIdx]     = x;
         pos[vIdx + 1] = y;
@@ -270,8 +281,6 @@ export class TerrainChunk {
         uv[uvIdx]     = x / 6.0;
         uv[uvIdx + 1] = z / 6.0;
 
-        // Surface color blending based on road proximity and slope
-        const nearest = roadIndex.getNearestRoad(x, z, 24);
         let dirtWeight = 0;
         if (nearest) {
           const distToRoadEdge = Math.max(0, nearest.distance - nearest.roadHalfWidth);
@@ -430,20 +439,20 @@ export class TerrainChunk {
 
         const leftX = cxPoint - perpX * halfW;
         const leftZ = czPoint - perpZ * halfW;
-        const leftY = terrainHeight.groundHeightAt(leftX, leftZ) + 0.05;
+        const leftY = terrainHeight.groundHeightAt(leftX, leftZ);
 
         const rightX = cxPoint + perpX * halfW;
         const rightZ = czPoint + perpZ * halfW;
-        const rightY = terrainHeight.groundHeightAt(rightX, rightZ) + 0.05;
+        const rightY = terrainHeight.groundHeightAt(rightX, rightZ);
 
         ribbonPositions.push(leftX, leftY, leftZ, rightX, rightY, rightZ);
 
         const vDist = (t * len) / 8.0;
         ribbonUvs.push(0, vDist, 1, vDist);
 
-        // Center lane stripe points
+        // Center lane stripe points (+0.02 above asphalt surface)
         const stripeHalfW = edge.roadClass === RoadClass.HIGHWAY ? 0.35 : 0.20;
-        const stripeY = terrainHeight.groundHeightAt(cxPoint, czPoint) + 0.07;
+        const stripeY = terrainHeight.groundHeightAt(cxPoint, czPoint) + 0.02;
         stripePositions.push(
           cxPoint - perpX * stripeHalfW, stripeY, czPoint - perpZ * stripeHalfW,
           cxPoint + perpX * stripeHalfW, stripeY, czPoint + perpZ * stripeHalfW
