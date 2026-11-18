@@ -11,6 +11,7 @@
  */
 import * as THREE from 'three';
 import { GameState } from './GameState';
+import { audioEngine } from '../audio';
 import type { WorldSystem } from './WorldSystem';
 import type { VehicleSystem } from './VehicleSystem';
 import type { HudSystem } from './HudSystem';
@@ -60,8 +61,10 @@ export class RaceSystem {
 
     if (newState === GameState.PAUSED) {
       this.hudSystem.pauseMenu.show();
+      audioEngine.setGamePaused(true);
     } else {
       this.hudSystem.pauseMenu.hide();
+      audioEngine.setGamePaused(false);
     }
   }
 
@@ -120,9 +123,17 @@ export class RaceSystem {
 
     // 1. Staging Countdown
     if (this.gameState === GameState.COUNTDOWN) {
+      const prevSecond = Math.ceil(this.countdownTimer);
       this.countdownTimer -= dt;
+      const currentSecond = Math.ceil(this.countdownTimer);
+
+      if (currentSecond < prevSecond && currentSecond > 0 && currentSecond <= 3) {
+        audioEngine.playCountdownBeep(false);
+      }
+
       if (this.countdownTimer <= 0) {
         this.countdownTimer = -0.7; // 'GO!' banner active
+        audioEngine.playCountdownBeep(true);
         this.setGameState(GameState.RACING);
       }
       this.vehicleSystem.updateStaging(this.worldSystem.collisionWorld, this.worldSystem.trackQuery);
@@ -167,12 +178,14 @@ export class RaceSystem {
             }
             if (v.isPlayer) {
               this.worldSystem.track.updateGateVisuals(v.progress.activeCheckpointIndex);
+              audioEngine.playCheckpointChime();
             }
           } else if (v.progress.activeCheckpointIndex === 0) {
             // Lap complete!
             let isRecord = false;
             if (v.isPlayer) {
               isRecord = this.vehicleSystem.ghostRecorder.finishLap(v.progress.currentLapTime);
+              audioEngine.playLapComplete(isRecord);
               const m = Math.floor(v.progress.currentLapTime / 60);
               const s = (v.progress.currentLapTime % 60).toFixed(2).padStart(5, '0');
               const timeStr = `${m}:${s}`;

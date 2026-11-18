@@ -85,6 +85,10 @@ export class ArcadeCarController {
   boostActive = false;
   boostForce = 0;
   wasAirborneJustLanded = false;
+  lateralSlipSpeed = 0;       // magnitude of lateral sliding velocity (m/s)
+  isScrapingBarrier = false;  // true while in active contact with a barrier
+  barrierScrapeSpeed = 0;     // tangential velocity while scraping (m/s)
+  lastImpactSpeed = 0;        // impact velocity magnitude from recent collision
 
   // ── Interpolation State (for α-rendering) ───────────────────
   readonly prevPosition = new THREE.Vector3(0, 0.94, 25);
@@ -100,6 +104,9 @@ export class ArcadeCarController {
    */
   update(dt: number, input: InputState, collision: CollisionWorld): void {
     this.wasAirborneJustLanded = false;
+    this.isScrapingBarrier = false;
+    this.barrierScrapeSpeed = 0;
+    this.lastImpactSpeed = 0;
 
     // 1. Snapshot previous state for interpolated rendering
     this.prevPosition.copy(this.position);
@@ -315,6 +322,7 @@ export class ArcadeCarController {
       _fwdVel.copy(_fwdTan).multiplyScalar(this.speed);
       _latVel.copy(_rightTan).multiplyScalar(latSpeed);
       this.velocity.copy(_fwdVel).add(_latVel);
+      this.lateralSlipSpeed = Math.abs(latSpeed);
 
     } else {
       // ── Airborne Flight Dynamics ──
@@ -351,6 +359,8 @@ export class ArcadeCarController {
           this.velocity.projectOnPlane(_hitSide.normal);
         }
         this.speed *= 0.94; // slight friction on barrier brush
+        this.isScrapingBarrier = true;
+        this.barrierScrapeSpeed = Math.abs(this.speed);
       }
     }
 
@@ -363,6 +373,8 @@ export class ArcadeCarController {
           this.velocity.projectOnPlane(_hitSide.normal);
         }
         this.speed *= 0.94;
+        this.isScrapingBarrier = true;
+        this.barrierScrapeSpeed = Math.abs(this.speed);
       }
     }
 
@@ -404,7 +416,10 @@ export class ArcadeCarController {
 
           // Perpendicular obstacle/wall deflection: glide along the wall without locking up
           this.velocity.projectOnPlane(wallNormal);
+          this.lastImpactSpeed = Math.max(this.lastImpactSpeed, Math.abs(this.speed));
           this.speed *= 0.85; // slight speed scrub on wall brush
+          this.isScrapingBarrier = true;
+          this.barrierScrapeSpeed = Math.abs(this.speed);
           const pushBack = Math.max(0.08, (sweepDist - _hitFwd.distance) + 0.04);
           this.position.addScaledVector(wallNormal, pushBack);
           return;

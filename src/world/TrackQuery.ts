@@ -146,7 +146,12 @@ export class TrackQuery {
       const latVel = vehicle.controller.velocity.dot(result.binormal);
       if (latVel * result.lateralOffset > 0) {
         vehicle.controller.velocity.addScaledVector(result.binormal, -latVel);
+        if (Math.abs(latVel) > 2.0) {
+          vehicle.controller.lastImpactSpeed = Math.max(vehicle.controller.lastImpactSpeed, Math.abs(latVel));
+        }
       }
+      vehicle.controller.isScrapingBarrier = true;
+      vehicle.controller.barrierScrapeSpeed = Math.abs(vehicle.controller.speed);
     }
   }
 

@@ -1,4 +1,2 @@
-/**
- * src/audio/index.ts  (stub — will be built out in a future step)
- */
-export {};
+export * from './AudioSettings';
+export * from './AudioEngine';
