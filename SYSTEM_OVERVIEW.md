@@ -261,8 +261,8 @@ export const CarConfig = {
   rollingResistance: 2.0,    // deceleration when no input
 
   // Steering & Handling
-  steerSpeed:        3.8,    // rad/s — base steering rate
-  steerSpeedDecay:   0.40,   // speed decay factor
+  steerSpeed:        3.5,    // rad/s — base steering rate
+  steerSpeedDecay:   0.46,   // speed decay factor
   steerReturnSpeed:  6.5,    // rad/s — centering rate
   maxSteerAngle:     1.0,    // rad — visual front wheel turn
 

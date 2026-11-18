@@ -73,8 +73,8 @@ export const DEFAULT_CAR_CONFIG: Readonly<CarConfigType> = {
   rollingResistance: 2.0,
 
   // Steering & Handling
-  steerSpeed:        3.8,
-  steerSpeedDecay:   0.40,
+  steerSpeed:        3.5,
+  steerSpeedDecay:   0.46,
   steerReturnSpeed:  6.5,
   maxSteerAngle:     1.0,
 
