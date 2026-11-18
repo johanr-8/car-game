@@ -839,19 +839,31 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   }
 
   // 1c. Dubai Marina Waterfront Promenade (Crescent along Western Waterfront)
-  const m1 = getOrCreateNode(-250 * scale, -128 * scale, true);
+  const m1 = getOrCreateNode(-256 * scale, -128 * scale, true);
   const m2 = getOrCreateNode(-300 * scale, -64 * scale, true);
   const m3 = getOrCreateNode(-320 * scale, 0, true);
   const m4 = getOrCreateNode(-300 * scale, 64 * scale, true);
-  const m5 = getOrCreateNode(-250 * scale, 128 * scale, true);
+  const m5 = getOrCreateNode(-256 * scale, 128 * scale, true);
 
-  addEdge(dtGrid[-3][-3], m1, RoadClass.AVENUE);
+  // Orthogonal connections from Downtown Avenues to the Marina Promenade
+  addEdge(dtGrid[-3][-2], m1, RoadClass.AVENUE); // (-192, -128) -> (-256, -128) East-West
+  addEdge(dtGrid[-3][0], m3, RoadClass.AVENUE);  // (-192, 0) -> (-320, 0) East-West
+  addEdge(dtGrid[-3][2], m5, RoadClass.AVENUE);  // (-192, 128) -> (-256, 128) East-West
+
+  // Smooth curved crescent along the waterfront
   addEdge(m1, m2, RoadClass.AVENUE);
   addEdge(m2, m3, RoadClass.AVENUE);
   addEdge(m3, m4, RoadClass.AVENUE);
   addEdge(m4, m5, RoadClass.AVENUE);
-  addEdge(m5, dtGrid[-3][3], RoadClass.AVENUE);
-  addEdge(m3, dtGrid[-3][0], RoadClass.AVENUE); // Marina Walk cross-avenue
+
+  // Clean orthogonal corners connecting south and north ends back to grid perimeter
+  const mSouthCorner = getOrCreateNode(-256 * scale, -192 * scale, true);
+  addEdge(dtGrid[-3][-3], mSouthCorner, RoadClass.AVENUE); // (-192, -192) -> (-256, -192) East-West
+  addEdge(mSouthCorner, m1, RoadClass.AVENUE);             // (-256, -192) -> (-256, -128) North-South
+
+  const mNorthCorner = getOrCreateNode(-256 * scale, 192 * scale, true);
+  addEdge(dtGrid[-3][3], mNorthCorner, RoadClass.AVENUE);  // (-192, 192) -> (-256, 192) East-West
+  addEdge(m5, mNorthCorner, RoadClass.AVENUE);             // (-256, 128) -> (-256, 192) North-South
 
   // Downtown Gateway Perimeter Nodes
   const dtGwInd = dtGrid[-1][3];   // (-64, 192) to Industrial (NW)
@@ -892,12 +904,17 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   const indNode1 = getOrCreateNode(ind.x, ind.z + indR, true); // North
   const indNode2 = getOrCreateNode(ind.x - indR, ind.z, true); // West, faces Port
   const indNode3 = getOrCreateNode(ind.x, ind.z - indR, true); // South
-  addEdge(indNode0, indNode1, RoadClass.LOCAL);
-  addEdge(indNode1, indNode2, RoadClass.LOCAL);
-  addEdge(indNode2, indNode3, RoadClass.LOCAL);
-  addEdge(indNode3, indNode0, RoadClass.LOCAL);
+
+  // Clean orthogonal freight logistics corridor
+  addEdge(indNode2, indCenter, RoadClass.LOCAL);
   addEdge(indCenter, indNode0, RoadClass.LOCAL);
-  addEdge(indCenter, indNode2, RoadClass.LOCAL);
+  addEdge(indNode3, indCenter, RoadClass.LOCAL);
+  addEdge(indCenter, indNode1, RoadClass.LOCAL);
+
+  const indNodeNE = getOrCreateNode(ind.x + indR, ind.z + indR, true);
+  addEdge(indNode0, indNodeNE, RoadClass.LOCAL);
+  addEdge(indNodeNE, indNode1, RoadClass.LOCAL);
+
   const indGwDowntown = indNode0;
   const indGwPort = indNode2;
 
@@ -944,14 +961,19 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   const lakeR = 42.0 * scale;
   const lakeNode0 = getOrCreateNode(lake.x - lakeR, lake.z, true); // West, faces Farm
   const lakeNode1 = getOrCreateNode(lake.x, lake.z + lakeR, true); // North, faces Downtown / Pass
-  const lakeNode2 = getOrCreateNode(lake.x + lakeR, lake.z, true); // East, faces Summit
+  const lakeNode2 = getOrCreateNode(lake.x + lakeR, lake.z, true); // East, faces Summit route 2
   const lakeNode3 = getOrCreateNode(lake.x, lake.z - lakeR, true); // South
-  addEdge(lakeNode0, lakeNode1, RoadClass.LOCAL);
-  addEdge(lakeNode1, lakeNode2, RoadClass.LOCAL);
-  addEdge(lakeNode2, lakeNode3, RoadClass.LOCAL);
-  addEdge(lakeNode3, lakeNode0, RoadClass.LOCAL);
-  addEdge(lakeCenter, lakeNode0, RoadClass.LOCAL);
+
+  // Clean orthogonal lakeside crossroad
+  addEdge(lakeNode0, lakeCenter, RoadClass.LOCAL);
   addEdge(lakeCenter, lakeNode2, RoadClass.LOCAL);
+  addEdge(lakeNode3, lakeCenter, RoadClass.LOCAL);
+  addEdge(lakeCenter, lakeNode1, RoadClass.LOCAL);
+
+  const lakeNodeSW = getOrCreateNode(lake.x - lakeR, lake.z - lakeR, true);
+  addEdge(lakeNode0, lakeNodeSW, RoadClass.LOCAL);
+  addEdge(lakeNodeSW, lakeNode3, RoadClass.LOCAL);
+
   const lakeGwFarm = lakeNode0;
   const lakeGwDowntown = lakeNode1;
   const lakeGwPass = lakeNode1;
@@ -962,15 +984,20 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   const passCenter = townCenterIds[6];
   const passR = 38.0 * scale;
   const passNode0 = getOrCreateNode(pass.x - passR, pass.z, true); // West, faces Downtown
-  const passNode1 = getOrCreateNode(pass.x, pass.z + passR, true); // North, faces Summit
-  const passNode2 = getOrCreateNode(pass.x + passR, pass.z, true); // East
-  const passNode3 = getOrCreateNode(pass.x, pass.z - passR, true); // South, faces Lakeside
-  addEdge(passNode0, passNode1, RoadClass.LOCAL);
-  addEdge(passNode1, passNode2, RoadClass.LOCAL);
-  addEdge(passNode2, passNode3, RoadClass.LOCAL);
-  addEdge(passNode3, passNode0, RoadClass.LOCAL);
-  addEdge(passCenter, passNode0, RoadClass.LOCAL);
+  const passNode1 = getOrCreateNode(pass.x, pass.z + passR, true); // North, faces Summit switchbacks
+  const passNode2 = getOrCreateNode(pass.x + passR, pass.z, true); // East, scenic spur
+  const passNode3 = getOrCreateNode(pass.x - passR, pass.z - 60.0 * scale, true); // South, faces Lakeside along valley
+
+  // Clean orthogonal crossroad + perimeter avenue (NO diagonal diamond!)
+  addEdge(passNode0, passCenter, RoadClass.LOCAL);
+  addEdge(passCenter, passNode2, RoadClass.LOCAL);
   addEdge(passCenter, passNode1, RoadClass.LOCAL);
+  addEdge(passNode3, passNode0, RoadClass.LOCAL); // North-South avenue along valley floor
+
+  const passNodeNW = getOrCreateNode(pass.x - passR, pass.z + passR, true);
+  addEdge(passNode0, passNodeNW, RoadClass.LOCAL);
+  addEdge(passNodeNW, passNode1, RoadClass.LOCAL);
+
   const passGwDowntown = passNode0;
   const passGwSummit = passNode1;
   const passGwLake = passNode3;
@@ -1006,8 +1033,20 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
     { fromId: indGwPort, toId: portGwIndustrial, roadClass: RoadClass.HIGHWAY },
     // 8. Port <-> Coastal Pines [Coastal Highway]
     { fromId: portGwCoastalPines, toId: cpGwPort, roadClass: RoadClass.HIGHWAY, extraWaypoints: [{ x: -660 * scale, z: -270 * scale }] },
-    // 9. Coastal Pines <-> Farm [South Highway via chunk (-7, -7) at (-820, -820)]
-    { fromId: cpGwFarm, toId: farmGwCp, roadClass: RoadClass.HIGHWAY, extraWaypoints: [{ x: -820, z: -820 }, { x: -820, z: -820 }] },
+    // 9. Coastal Pines <-> Farm [South Highway via chunk (-7, -7) coastal sweeping curve]
+    {
+      fromId: cpGwFarm,
+      toId: farmGwCp,
+      roadClass: RoadClass.HIGHWAY,
+      extraWaypoints: [
+        { x: -680 * scale, z: -680 * scale },
+        { x: -780 * scale, z: -780 * scale },
+        { x: -800 * scale, z: -800 * scale },
+        { x: -750 * scale, z: -810 * scale },
+        { x: -600 * scale, z: -780 * scale },
+        { x: -300 * scale, z: -680 * scale },
+      ],
+    },
     // 10. Farm <-> Lakeside [Country Local Road]
     { fromId: farmGwLake, toId: lakeGwFarm, roadClass: RoadClass.LOCAL },
     // 11. Lakeside <-> Pass Gateway [Foothills Connector Avenue]
