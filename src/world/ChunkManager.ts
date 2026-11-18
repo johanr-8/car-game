@@ -19,7 +19,7 @@ import type { WorldSpec } from './WorldConfig';
 import type { TerrainHeight } from './TerrainHeight';
 import type { SpatialRoadIndex } from './RoadNetwork';
 import { RoadClass } from './RoadNetwork';
-import { getAsphaltTexture, getGrassTexture } from './TextureGenerator';
+import { getAsphaltTexture, getGrassTexture, getConcreteSidewalkTexture } from './TextureGenerator';
 import { ChunkCollider } from './ChunkCollider';
 import type { CityPropsGenerator } from './CityPropsGenerator';
 import type { CityPoolManager, InstancedPool } from './InstancedPool';
@@ -36,6 +36,11 @@ roamAsphaltTex.wrapS = THREE.RepeatWrapping;
 roamAsphaltTex.wrapT = THREE.RepeatWrapping;
 roamAsphaltTex.repeat.set(1, 1);
 
+const roamSidewalkTex = getConcreteSidewalkTexture().clone();
+roamSidewalkTex.wrapS = THREE.RepeatWrapping;
+roamSidewalkTex.wrapT = THREE.RepeatWrapping;
+roamSidewalkTex.repeat.set(1, 16);
+
 // Shared Materials (Created once, cached at module scope)
 const terrainMat = new THREE.MeshStandardMaterial({
   map: roamGrassTex,
@@ -43,6 +48,17 @@ const terrainMat = new THREE.MeshStandardMaterial({
   roughness: 0.88,
   metalness: 0.04,
   flatShading: false,
+});
+
+const sidewalkMat = new THREE.MeshStandardMaterial({
+  map: roamSidewalkTex,
+  color: 0xc8d1dc,
+  roughness: 0.82,
+  metalness: 0.12,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -1,
+  polygonOffsetUnits: -1,
 });
 
 const asphaltHighwayMat = new THREE.MeshStandardMaterial({
@@ -185,6 +201,10 @@ export class TerrainChunk {
   readonly allocatedBuildingSlots: { pool: InstancedPool; slot: number }[] = [];
   readonly allocatedTreeSlots: number[] = [];
   readonly allocatedLampSlots: number[] = [];
+  readonly allocatedBillboardSlots: { pool: InstancedPool; slot: number }[] = [];
+  readonly allocatedGantrySlots: number[] = [];
+  readonly allocatedBollardSlots: number[] = [];
+  readonly allocatedAntennaSlots: number[] = [];
 
   private readonly posAttr: THREE.BufferAttribute;
   private readonly normAttr: THREE.BufferAttribute;
@@ -258,14 +278,14 @@ export class TerrainChunk {
         let y = terrainHeight.groundHeightAt(x, z);
 
         // Surface color blending based on road proximity and slope
-        const nearest = roadIndex.getNearestRoad(x, z, 24);
+        const nearest = roadIndex.getNearestRoad(x, z, 32);
 
-        // Depress terrain mesh under asphalt ribbons to eliminate any clipping or overlapping
-        if (nearest && nearest.distance <= nearest.roadHalfWidth) {
-          y -= 0.16;
-        } else if (nearest && nearest.distance < nearest.roadHalfWidth + 1.5) {
-          const tEdge = (nearest.distance - nearest.roadHalfWidth) / 1.5;
-          y -= 0.16 * (1 - tEdge);
+        // Depress terrain mesh under asphalt ribbons and sidewalks to eliminate any clipping
+        if (nearest && nearest.distance <= nearest.roadHalfWidth + 2.8) {
+          y -= 0.22;
+        } else if (nearest && nearest.distance < nearest.roadHalfWidth + 4.0) {
+          const tEdge = (nearest.distance - (nearest.roadHalfWidth + 2.8)) / 1.2;
+          y -= 0.22 * (1 - tEdge);
         }
 
         pos[vIdx]     = x;
@@ -360,6 +380,44 @@ export class TerrainChunk {
         }
       }
 
+      // 4. Cyberpunk Rooftop Neon Billboards
+      for (let i = 0; i < props.billboardMatrices.length; i++) {
+        const item = props.billboardMatrices[i];
+        const pool = poolManager.billboardPools[item.poolIndex % poolManager.billboardPools.length];
+        const slot = pool.allocate();
+        if (slot >= 0) {
+          pool.setMatrix(slot, item.matrix);
+          this.allocatedBillboardSlots.push({ pool, slot });
+        }
+      }
+
+      // 5. Cyberpunk Highway Gantries
+      for (let i = 0; i < props.gantryMatrices.length; i++) {
+        const slot = poolManager.gantryPool.allocate();
+        if (slot >= 0) {
+          poolManager.gantryPool.setMatrix(slot, props.gantryMatrices[i]);
+          this.allocatedGantrySlots.push(slot);
+        }
+      }
+
+      // 6. Cyberpunk Street Bollards
+      for (let i = 0; i < props.bollardMatrices.length; i++) {
+        const slot = poolManager.bollardPool.allocate();
+        if (slot >= 0) {
+          poolManager.bollardPool.setMatrix(slot, props.bollardMatrices[i]);
+          this.allocatedBollardSlots.push(slot);
+        }
+      }
+
+      // 7. Cyberpunk Rooftop Antennas
+      for (let i = 0; i < props.antennaMatrices.length; i++) {
+        const slot = poolManager.antennaPool.allocate();
+        if (slot >= 0) {
+          poolManager.antennaPool.setMatrix(slot, props.antennaMatrices[i]);
+          this.allocatedAntennaSlots.push(slot);
+        }
+      }
+
       // 4. Landmark Group
       if (props.landmarkGroup) {
         this.landmarkGroup = props.landmarkGroup;
@@ -424,12 +482,16 @@ export class TerrainChunk {
       const perpZ = dirX;
 
       const halfW = edge.width * 0.5;
+      const sw = edge.roadClass === RoadClass.HIGHWAY ? 2.0 : 2.5;
 
-      const subSteps = Math.max(2, Math.ceil(segLen / 12));
+      const subSteps = Math.max(2, Math.ceil(segLen / 10));
       const ribbonPositions: number[] = [];
       const ribbonUvs: number[] = [];
       const stripePositions: number[] = [];
       const stripeUvs: number[] = [];
+      const leftSidewalkPos: number[] = [];
+      const rightSidewalkPos: number[] = [];
+      const sidewalkUvs: number[] = [];
 
       for (let s = 0; s <= subSteps; s++) {
         const stepT = s / subSteps;
@@ -437,27 +499,39 @@ export class TerrainChunk {
         const cxPoint = nA.x + t * dx;
         const czPoint = nA.z + t * dz;
 
+        // Road centerline elevation (ensures cross-section is 100% flat and level)
+        const roadY = terrainHeight.groundHeightAt(cxPoint, czPoint);
+        const swY = roadY + 0.04; // Raised concrete curb
+
         const leftX = cxPoint - perpX * halfW;
         const leftZ = czPoint - perpZ * halfW;
-        const leftY = terrainHeight.groundHeightAt(leftX, leftZ);
-
         const rightX = cxPoint + perpX * halfW;
         const rightZ = czPoint + perpZ * halfW;
-        const rightY = terrainHeight.groundHeightAt(rightX, rightZ);
 
-        ribbonPositions.push(leftX, leftY, leftZ, rightX, rightY, rightZ);
+        ribbonPositions.push(leftX, roadY, leftZ, rightX, roadY, rightZ);
 
         const vDist = (t * len) / 8.0;
         ribbonUvs.push(0, vDist, 1, vDist);
 
         // Center lane stripe points (+0.02 above asphalt surface)
         const stripeHalfW = edge.roadClass === RoadClass.HIGHWAY ? 0.35 : 0.20;
-        const stripeY = terrainHeight.groundHeightAt(cxPoint, czPoint) + 0.02;
+        const stripeY = roadY + 0.02;
         stripePositions.push(
           cxPoint - perpX * stripeHalfW, stripeY, czPoint - perpZ * stripeHalfW,
           cxPoint + perpX * stripeHalfW, stripeY, czPoint + perpZ * stripeHalfW
         );
         stripeUvs.push(0, vDist, 1, vDist);
+
+        // Concrete Sidewalk Ribbons on both sides
+        const swLeftOuterX = leftX - perpX * sw;
+        const swLeftOuterZ = leftZ - perpZ * sw;
+        leftSidewalkPos.push(swLeftOuterX, swY, swLeftOuterZ, leftX, swY, leftZ);
+
+        const swRightOuterX = rightX + perpX * sw;
+        const swRightOuterZ = rightZ + perpZ * sw;
+        rightSidewalkPos.push(rightX, swY, rightZ, swRightOuterX, swY, swRightOuterZ);
+
+        sidewalkUvs.push(0, vDist, 1, vDist);
       }
 
       if (ribbonPositions.length >= 12) {
@@ -478,6 +552,18 @@ export class TerrainChunk {
         const stripeMat = edge.roadClass === RoadClass.HIGHWAY ? yellowStripeMat : whiteStripeMat;
         const stripeMesh = new THREE.Mesh(stripeGeo, stripeMat);
         this.roadGroup.add(stripeMesh);
+
+        // Construct Left Concrete Sidewalk
+        const leftSwGeo = this.createStripGeometry(leftSidewalkPos, sidewalkUvs);
+        const leftSwMesh = new THREE.Mesh(leftSwGeo, sidewalkMat);
+        leftSwMesh.receiveShadow = true;
+        this.roadGroup.add(leftSwMesh);
+
+        // Construct Right Concrete Sidewalk
+        const rightSwGeo = this.createStripGeometry(rightSidewalkPos, sidewalkUvs);
+        const rightSwMesh = new THREE.Mesh(rightSwGeo, sidewalkMat);
+        rightSwMesh.receiveShadow = true;
+        this.roadGroup.add(rightSwMesh);
       }
     }
   }
@@ -533,9 +619,26 @@ export class TerrainChunk {
       for (let i = 0; i < this.allocatedLampSlots.length; i++) {
         poolManager.lampPool.free(this.allocatedLampSlots[i]);
       }
+      for (let i = 0; i < this.allocatedBillboardSlots.length; i++) {
+        const e = this.allocatedBillboardSlots[i];
+        e.pool.free(e.slot);
+      }
+      for (let i = 0; i < this.allocatedGantrySlots.length; i++) {
+        poolManager.gantryPool.free(this.allocatedGantrySlots[i]);
+      }
+      for (let i = 0; i < this.allocatedBollardSlots.length; i++) {
+        poolManager.bollardPool.free(this.allocatedBollardSlots[i]);
+      }
+      for (let i = 0; i < this.allocatedAntennaSlots.length; i++) {
+        poolManager.antennaPool.free(this.allocatedAntennaSlots[i]);
+      }
     }
     this.allocatedTreeSlots.length = 0;
     this.allocatedLampSlots.length = 0;
+    this.allocatedBillboardSlots.length = 0;
+    this.allocatedGantrySlots.length = 0;
+    this.allocatedBollardSlots.length = 0;
+    this.allocatedAntennaSlots.length = 0;
 
     // Remove landmark visual mesh
     if (this.landmarkGroup) {

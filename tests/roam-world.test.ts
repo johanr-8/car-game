@@ -457,6 +457,14 @@ describe('Free Roam: Districts, City Props & Instanced Pools', () => {
 
     expect(poolManager.lampPool.allocatedCount).toBe(0);
     expect(poolManager.lampPool.availableCount).toBe(poolManager.lampPool.capacity);
+
+    for (const p of poolManager.billboardPools) {
+      expect(p.allocatedCount).toBe(0);
+      expect(p.availableCount).toBe(p.capacity);
+    }
+    expect(poolManager.gantryPool.allocatedCount).toBe(0);
+    expect(poolManager.bollardPool.allocatedCount).toBe(0);
+    expect(poolManager.antennaPool.allocatedCount).toBe(0);
   });
 
   it('safely handles pool capacity limit: logs warning once and skips without crashing', () => {

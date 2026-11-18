@@ -400,3 +400,216 @@ export function getHouseTexture(): THREE.CanvasTexture {
   cachedHouseTex = tex;
   return tex;
 }
+
+let cachedSidewalkTex: THREE.CanvasTexture | null = null;
+const cachedBillboardTextures: (THREE.CanvasTexture | null)[] = [null, null, null, null];
+let cachedGantryTex: THREE.CanvasTexture | null = null;
+
+/**
+ * Modern Urban Concrete Sidewalk Pavers Texture (256x256)
+ */
+export function getConcreteSidewalkTexture(): THREE.CanvasTexture {
+  if (cachedSidewalkTex) return cachedSidewalkTex;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  // Base urban concrete
+  ctx.fillStyle = '#a6b0be';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Square sidewalk paver slab seams
+  ctx.strokeStyle = '#8590a2';
+  ctx.lineWidth = 3;
+  const tileSize = 64;
+  for (let x = 0; x <= 256; x += tileSize) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, 256);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= 256; y += tileSize) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(256, y);
+    ctx.stroke();
+  }
+
+  // Stone grain & speckled concrete stipple
+  for (let i = 0; i < 3500; i++) {
+    const x = Math.random() * 256;
+    const y = Math.random() * 256;
+    ctx.fillStyle = Math.random() > 0.5 ? '#939dae' : '#b8c3d2';
+    ctx.fillRect(x, y, 1, 1);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 16);
+  cachedSidewalkTex = tex;
+  return tex;
+}
+
+function safeStrokeRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  if (typeof ctx.strokeRect === 'function') {
+    ctx.strokeRect(x, y, w, h);
+  } else if (typeof ctx.stroke === 'function') {
+    ctx.beginPath?.();
+    ctx.rect?.(x, y, w, h);
+    ctx.stroke();
+  }
+}
+
+function safeFillText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number): void {
+  if (typeof ctx.fillText === 'function') {
+    ctx.fillText(text, x, y);
+  }
+}
+
+/**
+ * Cyberpunk Glowing Holographic Neon Billboard Texture (512x256)
+ */
+export function getNeonBillboardTexture(style: number): THREE.CanvasTexture {
+  const idx = style % 4;
+  if (cachedBillboardTextures[idx]) return cachedBillboardTextures[idx]!;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  // Deep obsidian night backdrop
+  ctx.fillStyle = '#080a12';
+  ctx.fillRect(0, 0, 512, 256);
+
+  // Subtle digital grid overlay
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= 512; x += 32) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, 256);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= 256; y += 32) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(512, y);
+    ctx.stroke();
+  }
+
+  if (idx === 0) {
+    // Neon Cyberpunk "WARP // SPEED" (Magenta + Cyan)
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 8;
+    safeStrokeRect(ctx, 12, 12, 488, 232);
+
+    ctx.fillStyle = '#ff007f';
+    ctx.font = '900 64px -apple-system, sans-serif';
+    safeFillText(ctx, 'WARP SPEED', 40, 110);
+
+    ctx.fillStyle = '#00f0ff';
+    ctx.font = '700 28px monospace';
+    safeFillText(ctx, '超音速 // GRAVITY VELOCITY', 44, 160);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '600 18px monospace';
+    safeFillText(ctx, 'SEC-09 /// NITRO CHARGED', 44, 200);
+  } else if (idx === 1) {
+    // "NEO-DRIFT" (Laser Lime + Gold)
+    ctx.strokeStyle = '#39ff14';
+    ctx.lineWidth = 8;
+    safeStrokeRect(ctx, 12, 12, 488, 232);
+
+    ctx.fillStyle = '#39ff14';
+    ctx.font = '900 62px -apple-system, sans-serif';
+    safeFillText(ctx, 'NEO-DRIFT', 40, 105);
+
+    ctx.fillStyle = '#ffd700';
+    ctx.font = '700 32px monospace';
+    safeFillText(ctx, '⚡ 6DOF KINETICS // TOKYO', 44, 158);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = '600 18px monospace';
+    safeFillText(ctx, 'LATERAL ADHESION ACTIVE', 44, 200);
+  } else if (idx === 2) {
+    // "APEX // DOWNTOWN" (Electric Violet + Blaze Orange)
+    ctx.strokeStyle = '#8b5cf6';
+    ctx.lineWidth = 8;
+    safeStrokeRect(ctx, 12, 12, 488, 232);
+
+    ctx.fillStyle = '#f97316';
+    ctx.font = '900 60px -apple-system, sans-serif';
+    safeFillText(ctx, 'APEX OVERDRIVE', 36, 105);
+
+    ctx.fillStyle = '#8b5cf6';
+    ctx.font = '700 28px monospace';
+    safeFillText(ctx, 'METROPOLIS CIRCUIT 01', 40, 155);
+
+    ctx.fillStyle = '#34d399';
+    ctx.font = '600 18px monospace';
+    safeFillText(ctx, 'LIMITLESS HORIZON // 2077', 40, 198);
+  } else {
+    // "CYBER HYPERSPEED" (Cyan + Neon Red)
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = 8;
+    safeStrokeRect(ctx, 12, 12, 488, 232);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = '900 60px -apple-system, sans-serif';
+    safeFillText(ctx, 'HYPER-BOOST', 40, 105);
+
+    ctx.fillStyle = '#f43f5e';
+    ctx.font = '700 30px monospace';
+    safeFillText(ctx, 'NITROUS PROTOCOL // 99%', 44, 155);
+
+    ctx.fillStyle = '#facc15';
+    ctx.font = '600 18px monospace';
+    safeFillText(ctx, 'APEX TOWER SKYWAY ACCESS', 44, 198);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  cachedBillboardTextures[idx] = tex;
+  return tex;
+}
+
+/**
+ * Overhead Digital Highway Gantry Sign Board Texture (512x128)
+ */
+export function getGantryTexture(): THREE.CanvasTexture {
+  if (cachedGantryTex) return cachedGantryTex;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  // Highway sign green-cyan reflective base
+  ctx.fillStyle = '#064e3b';
+  ctx.fillRect(0, 0, 512, 128);
+
+  // Border outline
+  ctx.strokeStyle = '#34d399';
+  ctx.lineWidth = 6;
+  safeStrokeRect(ctx, 8, 8, 496, 112);
+
+  // Directional text & arrows
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 34px -apple-system, sans-serif';
+  safeFillText(ctx, 'HIGHWAY 101 ↑  DOWNTOWN', 28, 54);
+
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = '700 22px monospace';
+  safeFillText(ctx, 'SPEED LIMIT: 300 KM/H  •  RADAR ON', 32, 94);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  cachedGantryTex = tex;
+  return tex;
+}

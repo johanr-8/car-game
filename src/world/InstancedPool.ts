@@ -20,6 +20,8 @@ import {
   getBrickTexture,
   getWarehouseTexture,
   getHouseTexture,
+  getNeonBillboardTexture,
+  getGantryTexture,
 } from './TextureGenerator';
 
 export class InstancedPool {
@@ -167,6 +169,68 @@ function createStreetLampGeometry(): THREE.BufferGeometry {
   return mergeBufferGeometries([pole, arm, head]);
 }
 
+function createNeonBillboardGeometry(): THREE.BufferGeometry {
+  // Front glowing display screen (10m x 4.8m x 0.4m)
+  const screen = new THREE.BoxGeometry(10.0, 4.8, 0.4);
+  screen.translate(0, 5.0, 0);
+
+  // Twin vertical steel support legs
+  const leg1 = new THREE.CylinderGeometry(0.2, 0.25, 4.0, 6);
+  leg1.translate(-3.6, 2.0, 0);
+  const leg2 = new THREE.CylinderGeometry(0.2, 0.25, 4.0, 6);
+  leg2.translate(3.6, 2.0, 0);
+
+  // Rear diagonal structural bracing
+  const strut1 = new THREE.CylinderGeometry(0.12, 0.12, 4.5, 6);
+  strut1.rotateX(0.4);
+  strut1.translate(-3.6, 2.6, -0.9);
+  const strut2 = new THREE.CylinderGeometry(0.12, 0.12, 4.5, 6);
+  strut2.rotateX(0.4);
+  strut2.translate(3.6, 2.6, -0.9);
+
+  return mergeBufferGeometries([screen, leg1, leg2, strut1, strut2]);
+}
+
+function createHighwayGantryGeometry(): THREE.BufferGeometry {
+  // Spanning arch across roadway: left column, right column, crossbeam, sign board
+  const p1 = new THREE.CylinderGeometry(0.35, 0.45, 9.5, 8);
+  p1.translate(-12.0, 4.75, 0);
+
+  const p2 = new THREE.CylinderGeometry(0.35, 0.45, 9.5, 8);
+  p2.translate(12.0, 4.75, 0);
+
+  const beam = new THREE.BoxGeometry(25.0, 1.2, 1.2);
+  beam.translate(0, 9.0, 0);
+
+  const sign = new THREE.BoxGeometry(14.0, 2.8, 0.3);
+  sign.translate(0, 8.8, 0.65);
+
+  return mergeBufferGeometries([p1, p2, beam, sign]);
+}
+
+function createStreetBollardGeometry(): THREE.BufferGeometry {
+  const body = new THREE.CylinderGeometry(0.16, 0.20, 1.2, 8);
+  body.translate(0, 0.60, 0);
+
+  const ring = new THREE.CylinderGeometry(0.18, 0.18, 0.25, 8);
+  ring.translate(0, 1.10, 0);
+
+  return mergeBufferGeometries([body, ring]);
+}
+
+function createRooftopAntennaGeometry(): THREE.BufferGeometry {
+  const base = new THREE.BoxGeometry(2.5, 1.5, 2.5);
+  base.translate(0, 0.75, 0);
+
+  const mast = new THREE.CylinderGeometry(0.08, 0.35, 18.0, 6);
+  mast.translate(0, 10.5, 0);
+
+  const beacon = new THREE.SphereGeometry(0.55, 6, 6);
+  beacon.translate(0, 19.5, 0);
+
+  return mergeBufferGeometries([base, mast, beacon]);
+}
+
 function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
   let totalVerts = 0;
   let totalIndices = 0;
@@ -231,18 +295,30 @@ export class CityPoolManager {
   readonly buildingPools: Record<BuildingStyle, InstancedPool>;
   readonly treePool: InstancedPool;
   readonly lampPool: InstancedPool;
+  readonly billboardPools: InstancedPool[];
+  readonly gantryPool: InstancedPool;
+  readonly bollardPool: InstancedPool;
+  readonly antennaPool: InstancedPool;
   readonly rootGroup = new THREE.Group();
 
   // Capacities configured with generous safety factor
   static readonly BUILDING_CAPACITY = 500;
   static readonly TREE_CAPACITY = 2500;
   static readonly LAMP_CAPACITY = 1500;
+  static readonly BILLBOARD_CAPACITY = 300;
+  static readonly GANTRY_CAPACITY = 150;
+  static readonly BOLLARD_CAPACITY = 1200;
+  static readonly ANTENNA_CAPACITY = 400;
 
   constructor() {
     const unitBox = new THREE.BoxGeometry(1, 1, 1);
     const unitHouse = createUnitHouseGeometry();
     const treeGeo = createTreeGeometry();
     const lampGeo = createStreetLampGeometry();
+    const billboardGeo = createNeonBillboardGeometry();
+    const gantryGeo = createHighwayGantryGeometry();
+    const bollardGeo = createStreetBollardGeometry();
+    const antennaGeo = createRooftopAntennaGeometry();
 
     // 1. Materials for 6 building styles
     const glassMat = new THREE.MeshStandardMaterial({
@@ -302,7 +378,52 @@ export class CityPoolManager {
       emissiveIntensity: 0.25,
     });
 
-    // 3. Instantiate pools
+    // 3. Cyberpunk Architectural Materials
+    const bbMat1 = new THREE.MeshStandardMaterial({
+      map: getNeonBillboardTexture(0),
+      emissiveMap: getNeonBillboardTexture(0),
+      emissive: 0xffffff,
+      emissiveIntensity: 2.2,
+      roughness: 0.25,
+      metalness: 0.80,
+    });
+
+    const bbMat2 = new THREE.MeshStandardMaterial({
+      map: getNeonBillboardTexture(1),
+      emissiveMap: getNeonBillboardTexture(1),
+      emissive: 0xffffff,
+      emissiveIntensity: 2.2,
+      roughness: 0.25,
+      metalness: 0.80,
+    });
+
+    const gantryMat = new THREE.MeshStandardMaterial({
+      map: getGantryTexture(),
+      emissiveMap: getGantryTexture(),
+      emissive: 0x34d399,
+      emissiveIntensity: 1.4,
+      color: 0x334155,
+      metalness: 0.85,
+      roughness: 0.35,
+    });
+
+    const bollardMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      emissive: 0x00f0ff,
+      emissiveIntensity: 1.8,
+      metalness: 0.90,
+      roughness: 0.20,
+    });
+
+    const antennaMat = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      emissive: 0xef4444,
+      emissiveIntensity: 2.5,
+      metalness: 0.85,
+      roughness: 0.30,
+    });
+
+    // 4. Instantiate pools
     this.buildingPools = {
       [BuildingStyle.GLASS]: new InstancedPool('Building_Glass', unitBox, glassMat, CityPoolManager.BUILDING_CAPACITY),
       [BuildingStyle.CONCRETE]: new InstancedPool('Building_Concrete', unitBox, concreteMat, CityPoolManager.BUILDING_CAPACITY),
@@ -315,12 +436,27 @@ export class CityPoolManager {
     this.treePool = new InstancedPool('Props_Tree', treeGeo, treeMat, CityPoolManager.TREE_CAPACITY);
     this.lampPool = new InstancedPool('Props_StreetLamp', lampGeo, lampMat, CityPoolManager.LAMP_CAPACITY);
 
-    // Mount to rootGroup (strictly 8 draw calls total for all city props!)
+    this.billboardPools = [
+      new InstancedPool('Props_NeonBB1', billboardGeo, bbMat1, CityPoolManager.BILLBOARD_CAPACITY),
+      new InstancedPool('Props_NeonBB2', billboardGeo, bbMat2, CityPoolManager.BILLBOARD_CAPACITY),
+    ];
+
+    this.gantryPool = new InstancedPool('Props_Gantry', gantryGeo, gantryMat, CityPoolManager.GANTRY_CAPACITY);
+    this.bollardPool = new InstancedPool('Props_Bollard', bollardGeo, bollardMat, CityPoolManager.BOLLARD_CAPACITY);
+    this.antennaPool = new InstancedPool('Props_Antenna', antennaGeo, antennaMat, CityPoolManager.ANTENNA_CAPACITY);
+
+    // Mount to rootGroup
     for (const style of Object.values(BuildingStyle)) {
       this.rootGroup.add(this.buildingPools[style].mesh);
     }
     this.rootGroup.add(this.treePool.mesh);
     this.rootGroup.add(this.lampPool.mesh);
+    for (let i = 0; i < this.billboardPools.length; i++) {
+      this.rootGroup.add(this.billboardPools[i].mesh);
+    }
+    this.rootGroup.add(this.gantryPool.mesh);
+    this.rootGroup.add(this.bollardPool.mesh);
+    this.rootGroup.add(this.antennaPool.mesh);
   }
 
   commitAll(): void {
@@ -329,6 +465,12 @@ export class CityPoolManager {
     }
     this.treePool.commit();
     this.lampPool.commit();
+    for (let i = 0; i < this.billboardPools.length; i++) {
+      this.billboardPools[i].commit();
+    }
+    this.gantryPool.commit();
+    this.bollardPool.commit();
+    this.antennaPool.commit();
   }
 
   dispose(): void {
@@ -337,5 +479,11 @@ export class CityPoolManager {
     }
     this.treePool.dispose();
     this.lampPool.dispose();
+    for (let i = 0; i < this.billboardPools.length; i++) {
+      this.billboardPools[i].dispose();
+    }
+    this.gantryPool.dispose();
+    this.bollardPool.dispose();
+    this.antennaPool.dispose();
   }
 }

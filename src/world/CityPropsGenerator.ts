@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import type { WorldSpec } from './WorldConfig';
 import type { SpatialRoadIndex } from './RoadNetwork';
+import { RoadClass } from './RoadNetwork';
 import type { TerrainHeight } from './TerrainHeight';
 import type { DistrictMap, DistrictConfig } from './DistrictMap';
 import { BuildingStyle, DistrictType } from './DistrictMap';
@@ -32,6 +33,10 @@ export interface GeneratedProps {
   buildings: GeneratedBuilding[];
   treeMatrices: THREE.Matrix4[];
   lampMatrices: THREE.Matrix4[];
+  billboardMatrices: { poolIndex: number; matrix: THREE.Matrix4 }[];
+  gantryMatrices: THREE.Matrix4[];
+  bollardMatrices: THREE.Matrix4[];
+  antennaMatrices: THREE.Matrix4[];
   solidBoxes: SolidBox[];
   landmarkGroup?: THREE.Group;
 }
@@ -100,6 +105,10 @@ export class CityPropsGenerator {
     const buildings: GeneratedBuilding[] = [];
     const treeMatrices: THREE.Matrix4[] = [];
     const lampMatrices: THREE.Matrix4[] = [];
+    const billboardMatrices: { poolIndex: number; matrix: THREE.Matrix4 }[] = [];
+    const gantryMatrices: THREE.Matrix4[] = [];
+    const bollardMatrices: THREE.Matrix4[] = [];
+    const antennaMatrices: THREE.Matrix4[] = [];
     const solidBoxes: SolidBox[] = [];
 
     // ── 1. Check for Landmark in this Chunk ────────────────────
@@ -115,7 +124,7 @@ export class CityPropsGenerator {
 
     // ── 2. Building Lots Generation ───────────────────────────
     if (district.hasBuildings && district.styles.length > 0) {
-      this.generateLots(cx, cz, district, rng, buildings, solidBoxes, landmark);
+      this.generateLots(cx, cz, district, rng, buildings, solidBoxes, billboardMatrices, antennaMatrices, landmark);
     }
 
     // ── 3. Trees Generation ───────────────────────────────────
@@ -124,10 +133,20 @@ export class CityPropsGenerator {
     // ── 4. Street Lamps Generation ────────────────────────────
     this.generateStreetLamps(cx, cz, district, lampMatrices);
 
+    // ── 5. Cyberpunk Highway Gantries Generation ──────────────
+    this.generateHighwayGantries(cx, cz, gantryMatrices);
+
+    // ── 6. Cyberpunk Street Bollards Generation ───────────────
+    this.generateStreetBollards(cx, cz, district, bollardMatrices);
+
     return {
       buildings,
       treeMatrices,
       lampMatrices,
+      billboardMatrices,
+      gantryMatrices,
+      bollardMatrices,
+      antennaMatrices,
       solidBoxes,
       landmarkGroup,
     };
@@ -140,6 +159,8 @@ export class CityPropsGenerator {
     rng: ChunkRNG,
     outBuildings: GeneratedBuilding[],
     outSolidBoxes: SolidBox[],
+    outBillboards: { poolIndex: number; matrix: THREE.Matrix4 }[],
+    outAntennas: THREE.Matrix4[],
     landmark?: LandmarkDef
   ): void {
     const chunkSize = this.spec.chunkSize;
@@ -210,6 +231,25 @@ export class CityPropsGenerator {
 
         outBuildings.push({ style, matrix: mat, box });
         outSolidBoxes.push(box);
+
+        // Cyberpunk Rooftop Neon Billboards (Commercial & Downtown high-rises)
+        if (height >= 30 && rng.next() > 0.35) {
+          const bbY = groundY + height;
+          const bbMat = new THREE.Matrix4();
+          const bbPos = new THREE.Vector3(lotX, bbY, lotZ);
+          const bbQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+          bbMat.compose(bbPos, bbQuat, new THREE.Vector3(1, 1, 1));
+          outBillboards.push({ poolIndex: Math.floor(rng.range(0, 2)), matrix: bbMat });
+        }
+
+        // Cyberpunk Rooftop Communication Spire / Antennas with glowing red beacons
+        if ((height >= 36 || district.type === DistrictType.INDUSTRIAL) && rng.next() > 0.40) {
+          const antY = groundY + height;
+          const antMat = new THREE.Matrix4();
+          const antPos = new THREE.Vector3(lotX + rng.range(-2, 2), antY, lotZ + rng.range(-2, 2));
+          antMat.compose(antPos, new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+          outAntennas.push(antMat);
+        }
       }
     }
   }
@@ -344,6 +384,102 @@ export class CityPropsGenerator {
         mat.compose(pos, quat, new THREE.Vector3(1, 1, 1));
 
         outLampMatrices.push(mat);
+      }
+    }
+  }
+
+  private generateHighwayGantries(
+    cx: number,
+    cz: number,
+    outGantryMatrices: THREE.Matrix4[]
+  ): void {
+    const edges = this.roadIndex.getEdgesInChunk(cx, cz);
+    if (edges.length === 0) return;
+
+    const chunkSize = this.spec.chunkSize;
+    const minChunkX = cx * chunkSize;
+    const maxChunkX = (cx + 1) * chunkSize;
+    const minChunkZ = cz * chunkSize;
+    const maxChunkZ = (cz + 1) * chunkSize;
+    const nodes = this.roadIndex.graph.nodes;
+
+    for (let i = 0; i < edges.length; i++) {
+      const edge = edges[i];
+      if (edge.roadClass !== RoadClass.HIGHWAY && edge.roadClass !== RoadClass.AVENUE) continue;
+
+      const nA = nodes[edge.fromNodeId];
+      const nB = nodes[edge.toNodeId];
+      const dx = nB.x - nA.x;
+      const dz = nB.z - nA.z;
+      const len = Math.hypot(dx, dz);
+      if (len < 100) continue;
+
+      // Place in the middle of long segments
+      const t = 0.5;
+      const gX = nA.x + t * dx;
+      const gZ = nA.z + t * dz;
+
+      if (gX < minChunkX || gX >= maxChunkX || gZ < minChunkZ || gZ >= maxChunkZ) continue;
+
+      const gY = this.terrainHeight.groundHeightAt(gX, gZ);
+      const rotY = Math.atan2(dx, dz); // Aligned across roadway
+
+      const mat = new THREE.Matrix4();
+      const pos = new THREE.Vector3(gX, gY, gZ);
+      const quat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+      mat.compose(pos, quat, new THREE.Vector3(1, 1, 1));
+      outGantryMatrices.push(mat);
+    }
+  }
+
+  private generateStreetBollards(
+    cx: number,
+    cz: number,
+    district: DistrictConfig,
+    outBollardMatrices: THREE.Matrix4[]
+  ): void {
+    if (district.type !== DistrictType.DOWNTOWN && district.type !== DistrictType.MIDRISE) return;
+    const edges = this.roadIndex.getEdgesInChunk(cx, cz);
+    if (edges.length === 0) return;
+
+    const chunkSize = this.spec.chunkSize;
+    const minChunkX = cx * chunkSize;
+    const maxChunkX = (cx + 1) * chunkSize;
+    const minChunkZ = cz * chunkSize;
+    const maxChunkZ = (cz + 1) * chunkSize;
+    const nodes = this.roadIndex.graph.nodes;
+
+    for (let i = 0; i < edges.length; i++) {
+      const edge = edges[i];
+      const nA = nodes[edge.fromNodeId];
+      const nB = nodes[edge.toNodeId];
+      const dx = nB.x - nA.x;
+      const dz = nB.z - nA.z;
+      const len = Math.hypot(dx, dz);
+      if (len < 60) continue;
+
+      const dirX = dx / len;
+      const dirZ = dz / len;
+      const perpX = -dirZ;
+      const perpZ = dirX;
+
+      const bollardDist = edge.width * 0.5 + 1.2;
+
+      // Place bollards near start and end of block on both sides
+      const ts = [24 / len, 1 - 24 / len];
+      for (const t of ts) {
+        if (t <= 0 || t >= 1) continue;
+        for (const side of [-1, 1]) {
+          const bX = nA.x + t * dx + perpX * bollardDist * side;
+          const bZ = nA.z + t * dz + perpZ * bollardDist * side;
+
+          if (bX < minChunkX || bX >= maxChunkX || bZ < minChunkZ || bZ >= maxChunkZ) continue;
+
+          const bY = this.terrainHeight.groundHeightAt(bX, bZ);
+          const mat = new THREE.Matrix4();
+          mat.compose(new THREE.Vector3(bX, bY, bZ), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+          outBollardMatrices.push(mat);
+        }
       }
     }
   }
