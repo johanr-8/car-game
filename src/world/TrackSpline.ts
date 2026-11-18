@@ -16,6 +16,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CollisionWorld } from './CollisionWorld';
 import { getAsphaltTexture } from './TextureGenerator';
 
@@ -203,14 +204,13 @@ export class TrackSpline {
 
     // Tower structural edge columns (placed 10m outside track width)
     const colMat = new THREE.MeshStandardMaterial({ color: 0xd8e2ed, roughness: 0.4, metalness: 0.5 });
-    const colGeo = new THREE.BoxGeometry(1.6, 110, 1.6);
-    const colL = new THREE.Mesh(colGeo, colMat);
-    colL.position.set(-17, 55, -72);
-    colL.castShadow = true;
-    const colR = new THREE.Mesh(colGeo, colMat);
-    colR.position.set(17, 55, -72);
-    colR.castShadow = true;
-    this.group.add(colL, colR);
+    const colGeoL = new THREE.BoxGeometry(1.6, 110, 1.6).translate(-17, 55, -72);
+    const colGeoR = new THREE.BoxGeometry(1.6, 110, 1.6).translate(17, 55, -72);
+    const mergedCols = mergeGeometries([colGeoL, colGeoR]) || colGeoL;
+    const colMesh = new THREE.Mesh(mergedCols, colMat);
+    colMesh.castShadow = true;
+    colMesh.receiveShadow = true;
+    this.group.add(colMesh);
 
     if (collision) {
       // Tower proxy placed safely behind road surface so it never obstructs the car
@@ -500,21 +500,17 @@ export class TrackSpline {
       const spanW = def.radius * 1.5;
       const spanH = def.radius * 0.9;
 
-      // Steel Support Pillars
-      const pillarGeo = new THREE.BoxGeometry(0.8, spanH, 0.8);
-      const pillarL = new THREE.Mesh(pillarGeo, steelMat);
-      pillarL.position.set(-spanW * 0.5, spanH * 0.5, 0);
-      const pillarR = new THREE.Mesh(pillarGeo, steelMat);
-      pillarR.position.set(spanW * 0.5, spanH * 0.5, 0);
-      gateGroup.add(pillarL, pillarR);
+      // 1. Merged Steel Support Pillars & Top Crossbar Gantry (1 draw call per gate)
+      const pillarLGeo = new THREE.BoxGeometry(0.8, spanH, 0.8).translate(-spanW * 0.5, spanH * 0.5, 0);
+      const pillarRGeo = new THREE.BoxGeometry(0.8, spanH, 0.8).translate(spanW * 0.5, spanH * 0.5, 0);
+      const barGeo = new THREE.BoxGeometry(spanW + 1.4, 1.1, 1.2).translate(0, spanH, 0);
+      const mergedGantryGeo = mergeGeometries([pillarLGeo, pillarRGeo, barGeo]) || barGeo;
+      const gantryMesh = new THREE.Mesh(mergedGantryGeo, steelMat);
+      gantryMesh.castShadow = true;
+      gantryMesh.receiveShadow = true;
+      gateGroup.add(gantryMesh);
 
-      // Top Crossbar Gantry
-      const barGeo = new THREE.BoxGeometry(spanW + 1.4, 1.1, 1.2);
-      const bar = new THREE.Mesh(barGeo, steelMat);
-      bar.position.set(0, spanH, 0);
-      gateGroup.add(bar);
-
-      // LED Timing Lights
+      // 2. Merged LED Timing Lights (1 draw call per gate, no shadow cost)
       const ledMat = new THREE.MeshStandardMaterial({
         color: def.isStart ? 0x00ff66 : 0xffaa00,
         emissive: new THREE.Color(def.isStart ? 0x00ff66 : 0xffaa00),
@@ -522,12 +518,14 @@ export class TrackSpline {
         roughness: 0.2,
       });
 
-      const ledGeo = new THREE.SphereGeometry(0.45, 12, 12);
+      const ledGeos: THREE.BufferGeometry[] = [];
       for (let x = -spanW * 0.35; x <= spanW * 0.35; x += 3.0) {
-        const led = new THREE.Mesh(ledGeo, ledMat);
-        led.position.set(x, spanH - 0.7, 0);
-        gateGroup.add(led);
+        ledGeos.push(new THREE.SphereGeometry(0.45, 12, 12).translate(x, spanH - 0.7, 0));
       }
+      const mergedLedsGeo = mergeGeometries(ledGeos) || ledGeos[0];
+      const ledsMesh = new THREE.Mesh(mergedLedsGeo, ledMat);
+      ledsMesh.castShadow = false; // Emissive LED markers do not need shadow map pass
+      gateGroup.add(ledsMesh);
 
       this.group.add(gateGroup);
 

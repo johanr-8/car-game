@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
     <title>Warp City: Gravity Drift</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -18,6 +19,35 @@
         top: 0; left: 0;
       }
       canvas { display: block; }
+
+      @media (max-width: 1300px) {
+        #hud-top-bar {
+          transform: translate3d(-50%, 0, 0) scale(0.88) !important;
+          transform-origin: top center !important;
+        }
+        #hud-top-left {
+          flex-direction: column !important;
+          gap: 6px !important;
+          align-items: flex-start !important;
+        }
+      }
+
+      @media (max-width: 1050px) {
+        #hud-top-bar {
+          transform: translate3d(-50%, 0, 0) scale(0.78) !important;
+          transform-origin: top center !important;
+        }
+      }
+
+      @media (max-height: 700px) {
+        #hud-top-bar {
+          top: 8px !important;
+        }
+        #hud-top-left {
+          top: 8px !important;
+          left: 8px !important;
+        }
+      }
     </style>
   </head>
   <body>

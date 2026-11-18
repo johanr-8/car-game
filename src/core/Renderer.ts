@@ -24,6 +24,9 @@ export function createRenderer(container: HTMLElement): THREE.WebGLRenderer {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
 
+  // Let EffectComposer accumulate draw calls and triangles across passes
+  renderer.info.autoReset = false;
+
   container.appendChild(renderer.domElement);
 
   // Handle resize

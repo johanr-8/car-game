@@ -38,6 +38,8 @@ export class ControlsModal {
     const panel = document.createElement('div');
     Object.assign(panel.style, {
       width:           '480px',
+      maxHeight:       '90vh',
+      overflowY:       'auto',
       padding:         '28px 32px',
       background:      'rgba(15, 23, 42, 0.98)',
       border:          '1px solid rgba(56, 189, 248, 0.35)',

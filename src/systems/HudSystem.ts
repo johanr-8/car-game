@@ -14,7 +14,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
-import { RaceHUD } from '../ui/RaceHUD';
+import { RaceHUD, type RaceHUDUpdateParams } from '../ui/RaceHUD';
 import { DebugOverlay } from '../ui/DebugOverlay';
 import { PauseMenu } from '../ui/PauseMenu';
 import { DevTuningPanel } from '../ui/DevTuningPanel';
@@ -24,6 +24,7 @@ import { ControlsModal } from '../ui/ControlsModal';
 import { ResultsModal } from '../ui/ResultsModal';
 import { LoadingScreen } from '../ui/LoadingScreen';
 import { StatsCollector } from '../core/StatsCollector';
+import { isDevMode } from '../core/DevMode';
 import type { VehicleEntity } from '../car/VehicleEntity';
 import type { WorldSystem } from './WorldSystem';
 import { GameState } from './GameState';
@@ -39,6 +40,22 @@ export class HudSystem {
   readonly resultsModal = new ResultsModal();
   readonly loadingScreen = new LoadingScreen();
   readonly stats = new StatsCollector();
+
+  private readonly hudUpdateParams: RaceHUDUpdateParams = {
+    currentLapTime: 0,
+    bestLapTime: null,
+    lapCount: 1,
+    activeCheckpoint: 0,
+    totalCheckpoints: 8,
+    speedKmh: 0,
+    positionRank: 1,
+    boostCharge: 0,
+    isBoosting: false,
+    hasGhost: false,
+    isInverted: false,
+    isWrongWay: false,
+    dt: 0,
+  };
 
   /**
    * Per-render-frame HUD update.
@@ -56,12 +73,14 @@ export class HudSystem {
   ): void {
     // 1. Stats recording
     this.stats.record(dtMs);
-    const n = playerVehicle.controller.surfaceNormal;
-    const status = playerVehicle.controller.isGrounded ? 'GROUND' : 'AIR';
-    this.stats.gravityLabel = `[${status}] N:(${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}) | ${(playerVehicle.controller.speed * 3.6).toFixed(0)} km/h`;
+    if (this.debugOverlay.isVisible) {
+      const n = playerVehicle.controller.surfaceNormal;
+      const status = playerVehicle.controller.isGrounded ? 'GROUND' : 'AIR';
+      this.stats.gravityLabel = `[${status}] N:(${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}) | ${(playerVehicle.controller.speed * 3.6).toFixed(0)} km/h`;
+    }
 
     // 2. Debug Overlay update
-    if (this.debugOverlay.isVisible) {
+    if (this.debugOverlay.isVisible || isDevMode()) {
       this.debugOverlay.update(this.stats, renderer, dt);
     }
 
@@ -74,20 +93,21 @@ export class HudSystem {
         this.raceHUD.updateCountdown(-999);
       }
 
-      this.raceHUD.update({
-        currentLapTime: playerVehicle.progress.currentLapTime,
-        bestLapTime,
-        lapCount: playerVehicle.progress.lapCount,
-        activeCheckpoint: playerVehicle.progress.activeCheckpointIndex,
-        totalCheckpoints: worldSystem.track.checkpoints.length,
-        speedKmh: playerVehicle.controller.speed * 3.6,
-        boostCharge: playerVehicle.boost.charge,
-        isBoosting: playerVehicle.controller.boostActive,
-        hasGhost,
-        isInverted: worldSystem.inversion.isInverted,
-        isWrongWay: playerVehicle.progress.isWrongWay,
-        dt,
-      });
+      const p = this.hudUpdateParams;
+      p.currentLapTime = playerVehicle.progress.currentLapTime;
+      p.bestLapTime = bestLapTime;
+      p.lapCount = playerVehicle.progress.lapCount;
+      p.activeCheckpoint = playerVehicle.progress.activeCheckpointIndex;
+      p.totalCheckpoints = worldSystem.track.checkpoints.length;
+      p.speedKmh = playerVehicle.controller.speed * 3.6;
+      p.boostCharge = playerVehicle.boost.charge;
+      p.isBoosting = playerVehicle.controller.boostActive;
+      p.hasGhost = hasGhost;
+      p.isInverted = worldSystem.inversion.isInverted;
+      p.isWrongWay = playerVehicle.progress.isWrongWay;
+      p.dt = dt;
+
+      this.raceHUD.update(p);
     } else {
       this.raceHUD.hide();
     }

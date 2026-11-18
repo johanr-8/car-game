@@ -27,6 +27,8 @@ export class BoostSystem {
   lastRefillReason = '';
   refillEventTimer = 0;
 
+  private readonly _boostResult = { isBoosting: false, boostForce: 0 };
+
   /**
    * Called each physics tick to manage charge and boost output.
    * Returns current acceleration boost multiplier.
@@ -60,11 +62,15 @@ export class BoostSystem {
     if (wantsBoost && this.charge > 1) {
       this.isBoosting = true;
       this.charge = Math.max(0, this.charge - this.drainRate * dt);
-      return { isBoosting: true, boostForce: 36 };
+      this._boostResult.isBoosting = true;
+      this._boostResult.boostForce = 36;
+      return this._boostResult;
     }
 
     this.isBoosting = false;
-    return { isBoosting: false, boostForce: 0 };
+    this._boostResult.isBoosting = false;
+    this._boostResult.boostForce = 0;
+    return this._boostResult;
   }
 
   /**

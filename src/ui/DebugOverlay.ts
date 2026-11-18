@@ -136,6 +136,20 @@ export class DebugOverlay {
   hide(): void  { this.visible = false; this.root.style.display = 'none'; }
   get isVisible(): boolean { return this.visible; }
 
+  getSnapshots(): readonly ProfileSnapshot[] {
+    return this.snapshots;
+  }
+
+  reset(): void {
+    this.snapshots.length = 0;
+    this.sampleCount = 0;
+    this.windowTimer = 0;
+    this.sessionTimer = 0;
+    this.hasLogged5MinSummary = false;
+    this.lastP50 = 0;
+    this.lastP99 = 0;
+  }
+
   /**
    * Continuous profiling update called once per rendered frame.
    * Zero per-frame heap allocations.

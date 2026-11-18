@@ -58,6 +58,7 @@ export class ProceduralCity {
 
   private lastChunkX = 9999;
   private lastChunkZ = 9999;
+  private readonly chunkIndices = new Uint32Array(4);
 
   constructor(
     collision: CollisionWorld,
@@ -340,7 +341,7 @@ export class ProceduralCity {
     const visibleRadius = 3;
     let matrixNeedsUpdate = false;
 
-    const currentIndices = [0, 0, 0, 0];
+    this.chunkIndices.fill(0);
 
     for (let i = 0; i < this.buildings.length; i++) {
       const b = this.buildings[i];
@@ -348,7 +349,7 @@ export class ProceduralCity {
       const isVisible = distChunks <= visibleRadius;
 
       const style = b.materialStyle;
-      const idx = currentIndices[style]++;
+      const idx = this.chunkIndices[style]++;
 
       if (isVisible) {
         this.buildingInstMeshes[style].setMatrixAt(idx, this.fullMatrices[style][idx]);

@@ -43,7 +43,11 @@ export class MainMenu {
       alignItems:     'center',
       gap:            '20px',
       maxWidth:       '480px',
+      maxHeight:      '94vh',
+      overflowY:      'auto',
       width:          '90%',
+      padding:        '12px',
+      boxSizing:      'border-box',
       textAlign:      'center',
     } as Partial<CSSStyleDeclaration>);
 

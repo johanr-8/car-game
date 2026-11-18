@@ -45,6 +45,8 @@ export class PauseMenu {
     const card = document.createElement('div');
     Object.assign(card.style, {
       width:           '360px',
+      maxHeight:       '94vh',
+      overflowY:       'auto',
       padding:         '32px',
       background:      'rgba(15, 23, 42, 0.95)',
       border:          '1px solid rgba(56, 189, 248, 0.3)',

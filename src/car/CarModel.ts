@@ -109,6 +109,7 @@ export class CarModel {
     const bodyGeo = new THREE.BoxGeometry(C.carWidth, C.carHeight * 0.45, C.carLength * 0.95);
     const bodyMesh = new THREE.Mesh(bodyGeo, paintMat);
     bodyMesh.position.y = C.carHeight * 0.32;
+    bodyMesh.castShadow = true;
     this.group.add(bodyMesh);
 
     // Sloped Front Hood Wedge
@@ -116,6 +117,7 @@ export class CarModel {
     const hoodMesh = new THREE.Mesh(hoodGeo, paintMat);
     hoodMesh.position.set(0, C.carHeight * 0.22, -C.carLength * 0.42);
     hoodMesh.rotation.x = 0.12;
+    hoodMesh.castShadow = true;
     this.group.add(hoodMesh);
 
     // Front Aerodynamic Splitter
@@ -128,6 +130,7 @@ export class CarModel {
     const cabinGeo = new THREE.BoxGeometry(C.carWidth * 0.75, C.carHeight * 0.45, C.carLength * 0.48);
     const cabinMesh = new THREE.Mesh(cabinGeo, glassMat);
     cabinMesh.position.set(0, C.carHeight * 0.65, 0.05);
+    cabinMesh.castShadow = true;
     this.group.add(cabinMesh);
 
     // Roof Panel
@@ -140,6 +143,7 @@ export class CarModel {
     const wingGeo = new THREE.BoxGeometry(C.carWidth * 0.98, 0.06, 0.35);
     const wing = new THREE.Mesh(wingGeo, trimMat);
     wing.position.set(0, C.carHeight * 0.75, C.carLength * 0.46);
+    wing.castShadow = true;
     this.group.add(wing);
 
     // Wing Struts
@@ -211,10 +215,9 @@ export class CarModel {
     this.group.add(makeRealisticWheel(false, true));
     this.group.add(makeRealisticWheel(false, false));
 
-    // Enable real-time shadow casting & receiving across all supercar components
+    // Enable real-time shadow receiving across supercar components
     this.group.traverse(obj => {
       if ((obj as THREE.Mesh).isMesh) {
-        obj.castShadow = true;
         obj.receiveShadow = true;
       }
     });

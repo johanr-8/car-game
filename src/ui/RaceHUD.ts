@@ -16,6 +16,22 @@
  */
 import * as THREE from 'three';
 
+export interface RaceHUDUpdateParams {
+  currentLapTime: number;
+  bestLapTime: number | null;
+  lapCount: number;
+  activeCheckpoint: number;
+  totalCheckpoints: number;
+  speedKmh: number;
+  positionRank?: number;
+  boostCharge: number;
+  isBoosting: boolean;
+  hasGhost: boolean;
+  isInverted: boolean;
+  isWrongWay?: boolean;
+  dt: number;
+}
+
 export class RaceHUD {
   private readonly root: HTMLDivElement;
   private displaySpeed = 0;
@@ -82,6 +98,7 @@ export class RaceHUD {
 
     // ── 1. Top Left: Seed & Theme Badge + Help Button ─────────
     const topLeftBox = document.createElement('div');
+    topLeftBox.id = 'hud-top-left';
     Object.assign(topLeftBox.style, {
       position:       'absolute',
       top:            '16px',
@@ -127,6 +144,7 @@ export class RaceHUD {
 
     // ── 2. Top Header Bar (Timer, Position, Checkpoints) ─────
     const topBar = document.createElement('div');
+    topBar.id = 'hud-top-bar';
     Object.assign(topBar.style, {
       position:       'absolute',
       top:            '16px',
@@ -356,6 +374,8 @@ export class RaceHUD {
       transform:      'translate(-50%, -50%)',
       width:          '90%',
       maxWidth:       '620px',
+      maxHeight:      '90vh',
+      overflowY:      'auto',
       background:     'rgba(15, 23, 42, 0.97)',
       border:         '1px solid rgba(255, 255, 255, 0.2)',
       borderRadius:   '12px',
@@ -427,6 +447,8 @@ export class RaceHUD {
       transform:      'translate(-50%, -50%)',
       width:          '90%',
       maxWidth:       '580px',
+      maxHeight:      '92vh',
+      overflowY:      'auto',
       background:     'rgba(15, 23, 42, 0.98)',
       border:         '2px solid #ffd700',
       borderRadius:   '14px',
@@ -586,21 +608,7 @@ export class RaceHUD {
     return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}.${ms < 100 ? (ms < 10 ? '00' : '0') : ''}${ms}`;
   }
 
-  update(options: {
-    currentLapTime: number;
-    bestLapTime: number | null;
-    lapCount: number;
-    activeCheckpoint: number;
-    totalCheckpoints: number;
-    speedKmh: number;
-    positionRank?: number;
-    boostCharge: number;
-    isBoosting: boolean;
-    hasGhost: boolean;
-    isInverted: boolean;
-    isWrongWay?: boolean;
-    dt: number;
-  }): void {
+  update(options: RaceHUDUpdateParams): void {
     const {
       currentLapTime,
       bestLapTime,
