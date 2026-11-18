@@ -137,15 +137,14 @@ function loop(): void {
     inversion.evaluateInversion(activeCheckpointIndex, carCtrl.position.y);
     inversion.update(FIXED_DT);
 
-    // 3. Kinetic Boost System Update (Skill-based Nitro)
+    // 3. Kinetic Boost System Update (Track-based Skill Rewards)
     const { isBoosting, boostForce } = boostSystem.update(
       FIXED_DT,
       input.boost,
       carCtrl.isGrounded,
       carCtrl.surfaceNormal.y,
       carCtrl.speed,
-      carCtrl.isDrifting,
-      carCtrl.wasAirborneJustLanded
+      carCtrl.isDrifting
     );
 ```
 
@@ -195,7 +194,7 @@ There is **no finite state machine (FSM)**. Game flow is controlled through scat
   - `steerVisual: number` — Smoothed steering input for wheel turning visuals
   - `boostActive: boolean` — Set externally by `BoostSystem`
   - `boostForce: number` — Additional acceleration applied when boosting
-  - `wasAirborneJustLanded: boolean` — Single-tick flag when transitioning air -> ground
+  - `hasBarrierContact: boolean` — Sector barrier contact flag (cleared on checkpoint crossing)
   - `get speedNorm(): number` — Speed scalar normalized against top speed (0..1)
 - **Methods**:
   - `update(dt: number, input: InputState, collision: CollisionWorld): void` — Full 120Hz physics step
@@ -204,8 +203,6 @@ There is **no finite state machine (FSM)**. Game flow is controlled through scat
 ### Quoted Physics Update Function (`src/car/ArcadeCarController.ts:99-135`)
 ```typescript
   update(dt: number, input: InputState, collision: CollisionWorld): void {
-    this.wasAirborneJustLanded = false;
-
     // 1. Snapshot previous state for interpolated rendering
     this.prevPosition.copy(this.position);
     this.prevQuaternion.copy(this.quaternion);
@@ -225,11 +222,7 @@ There is **no finite state machine (FSM)**. Game flow is controlled through scat
     _fwdTan.crossVectors(this.surfaceNormal, _rightTan).normalize();
 
     // 4. Ground / Surface detection via BVH raycast
-    const wasAirborne = !this.isGrounded;
     this.detectSurface(collision);
-    if (wasAirborne && this.isGrounded) {
-      this.wasAirborneJustLanded = true;
-    }
 
     // 5. Arcade dynamics (Throttle, Brake, Steer, Grip, Boost)
     this.handleArcadeDynamics(dt, input);

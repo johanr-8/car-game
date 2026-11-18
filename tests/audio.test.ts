@@ -87,7 +87,6 @@ describe('Procedural Web Audio Engine', () => {
         isBoosting: false,
         isScrapingBarrier: false,
         barrierScrapeSpeed: 0,
-        wasAirborneJustLanded: false,
         impactSpeed: 0,
       };
 
@@ -118,8 +117,7 @@ describe('Procedural Web Audio Engine', () => {
       state.barrierScrapeSpeed = 45.0;
       expect(() => engine.update(1 / 60, state)).not.toThrow();
 
-      // 7. Landing impact from jump
-      state.wasAirborneJustLanded = true;
+      // 7. Barrier collision impact
       state.impactSpeed = 15.0;
       expect(() => engine.update(1 / 60, state)).not.toThrow();
     });

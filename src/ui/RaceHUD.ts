@@ -557,8 +557,9 @@ export class RaceHUD {
     }
   }
 
-  showTrickPopup(text: string): void {
+  showTrickPopup(text: string, color?: string): void {
     this.elTrickPopup.textContent = text;
+    this.elTrickPopup.style.background = color || 'rgba(34, 197, 94, 0.9)';
     this.elTrickPopup.style.opacity = '1';
     this.trickTimer = 1.4;
   }

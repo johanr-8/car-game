@@ -30,6 +30,12 @@ export interface CarConfigType {
   driftSteerBoost: number;        // steering authority multiplier while drifting
   brakeDeadzoneTime: number;      // standstill seconds before reversing
 
+  // ── Boost Economy & Skill Rewards ──
+  cleanSectorBonus: number;       // instant boost % for passing sector without barrier contact
+  apexBonusAmount: number;        // boost % for clipping inside curb at speed
+  apexMinSpeed: number;           // min speed (m/s) to trigger apex bonus (~90 km/h)
+  apexBonusCooldown: number;      // cooldown in seconds between apex rewards
+
   // ── 6DOF Surface Physics ──
   gravityDir: readonly [number, number, number];
   gravityStrength: number;
@@ -85,6 +91,12 @@ export const DEFAULT_CAR_CONFIG: Readonly<CarConfigType> = {
   driftEntrySpeed:       10,
   driftSteerBoost:       1.35,
   brakeDeadzoneTime:     0.12,
+
+  // Boost Economy & Skill Rewards
+  cleanSectorBonus:      10,
+  apexBonusAmount:       3,
+  apexMinSpeed:          25.0,
+  apexBonusCooldown:     1.5,
 
   // 6DOF Surface Physics
   gravityDir:        [0, -1, 0],

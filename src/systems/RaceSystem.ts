@@ -11,7 +11,6 @@
  */
 import * as THREE from 'three';
 import { GameState } from './GameState';
-import { audioEngine } from '../audio';
 import type { WorldSystem } from './WorldSystem';
 import type { VehicleSystem } from './VehicleSystem';
 import type { HudSystem } from './HudSystem';
@@ -61,10 +60,8 @@ export class RaceSystem {
 
     if (newState === GameState.PAUSED) {
       this.hudSystem.pauseMenu.show();
-      audioEngine.setGamePaused(true);
     } else {
       this.hudSystem.pauseMenu.hide();
-      audioEngine.setGamePaused(false);
     }
   }
 
@@ -123,17 +120,9 @@ export class RaceSystem {
 
     // 1. Staging Countdown
     if (this.gameState === GameState.COUNTDOWN) {
-      const prevSecond = Math.ceil(this.countdownTimer);
       this.countdownTimer -= dt;
-      const currentSecond = Math.ceil(this.countdownTimer);
-
-      if (currentSecond < prevSecond && currentSecond > 0 && currentSecond <= 3) {
-        audioEngine.playCountdownBeep(false);
-      }
-
       if (this.countdownTimer <= 0) {
         this.countdownTimer = -0.7; // 'GO!' banner active
-        audioEngine.playCountdownBeep(true);
         this.setGameState(GameState.RACING);
       }
       this.vehicleSystem.updateStaging(this.worldSystem.collisionWorld, this.worldSystem.trackQuery);
@@ -164,12 +153,27 @@ export class RaceSystem {
 
           // Boost refill notification
           if (v.boost.refillEventTimer > 1.3 && v.boost.lastRefillReason) {
-            this.hudSystem.raceHUD.showTrickPopup(v.boost.lastRefillReason);
+            const color = v.boost.lastRefillReason === 'APEX CURB'
+              ? 'rgba(245, 158, 11, 0.95)'
+              : v.boost.lastRefillReason === 'CLEAN SECTOR'
+              ? 'rgba(16, 185, 129, 0.95)'
+              : undefined;
+            this.hudSystem.raceHUD.showTrickPopup(v.boost.lastRefillReason, color);
           }
         }
 
         const targetCP = this.worldSystem.track.checkpoints[v.progress.activeCheckpointIndex];
         if (this.worldSystem.trackQuery.checkGateCrossing(v.controller.position, targetCP)) {
+          // Clean sector skill reward (+10%)
+          if (!v.progress.hasBarrierContact) {
+            v.boost.triggerCleanSector();
+            if (v.isPlayer) {
+              this.hudSystem.raceHUD.showTrickPopup('CLEAN SECTOR +10%', 'rgba(16, 185, 129, 0.95)');
+            }
+          }
+          v.progress.hasBarrierContact = false;
+          v.controller.hasBarrierContact = false;
+
           if (!v.progress.awaitingFinishLine) {
             v.progress.activeCheckpointIndex++;
             if (v.progress.activeCheckpointIndex >= this.worldSystem.track.checkpoints.length) {
@@ -178,14 +182,12 @@ export class RaceSystem {
             }
             if (v.isPlayer) {
               this.worldSystem.track.updateGateVisuals(v.progress.activeCheckpointIndex);
-              audioEngine.playCheckpointChime();
             }
           } else if (v.progress.activeCheckpointIndex === 0) {
             // Lap complete!
             let isRecord = false;
             if (v.isPlayer) {
               isRecord = this.vehicleSystem.ghostRecorder.finishLap(v.progress.currentLapTime);
-              audioEngine.playLapComplete(isRecord);
               const m = Math.floor(v.progress.currentLapTime / 60);
               const s = (v.progress.currentLapTime % 60).toFixed(2).padStart(5, '0');
               const timeStr = `${m}:${s}`;

@@ -81,7 +81,10 @@ export class VehicleSystem {
       // 2. Track containment (bypassed if airborne)
       trackQuery.containVehicle(v);
 
-      // 3. Wrong-way detection
+      // 3. Apex inside curb clipping bonus (+3%)
+      trackQuery.checkApexBonus(v);
+
+      // 4. Wrong-way detection
       trackQuery.updateWrongWay(v, dt);
 
       // 4. Void Fail-Safe Rescue

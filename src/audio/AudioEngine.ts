@@ -9,7 +9,7 @@
  *   - Nitro Boost Jet Whoosh + Sub Rumble + Ignition Thump
  *   - Speed-scaled Wind Rush
  *   - Metallic Barrier Scrape
- *   - Clean Landing & Collision Impacts
+ *   - Barrier Collision Impacts
  *   - UI Countdown Beeps, Checkpoint Chimes & Victory Fanfares
  *
  * RULES.md: Zero per-frame allocations. All audio nodes are persistent / pooled.
@@ -27,7 +27,6 @@ export interface AudioVehicleState {
   isBoosting: boolean;         // Nitro boost active
   isScrapingBarrier: boolean;  // Scraping lateral barrier
   barrierScrapeSpeed: number;  // Tangential velocity against barrier
-  wasAirborneJustLanded: boolean; // Just touched down from jump
   impactSpeed: number;         // Barrier / obstacle impact velocity
 }
 
@@ -85,9 +84,7 @@ export class AudioEngine {
   private scrapeFilter!: BiquadFilterNode;
   private scrapeGain!: GainNode;
 
-  // ── Impacts & Landings ──
-  private landingOsc!: OscillatorNode;
-  private landingGain!: GainNode;
+  // ── Barrier Collision Impacts ──
   private impactOsc!: OscillatorNode;
   private impactFilter!: BiquadFilterNode;
   private impactGain!: GainNode;
@@ -338,18 +335,7 @@ export class AudioEngine {
     this.scrapeGain.connect(this.effectsBus);
     this.scrapeSource.start(now);
 
-    // 8. Clean Landing & Barrier Collision Hits
-    this.landingOsc = ctx.createOscillator();
-    this.landingOsc.type = 'sine';
-    this.landingOsc.frequency.setValueAtTime(110, now);
-
-    this.landingGain = ctx.createGain();
-    this.landingGain.gain.setValueAtTime(0, now);
-
-    this.landingOsc.connect(this.landingGain);
-    this.landingGain.connect(this.effectsBus);
-    this.landingOsc.start(now);
-
+    // 8. Barrier Collision Hits
     this.impactOsc = ctx.createOscillator();
     this.impactOsc.type = 'sine';
     this.impactOsc.frequency.setValueAtTime(80, now);
@@ -581,10 +567,7 @@ export class AudioEngine {
       this.scrapeGain.gain.setTargetAtTime(0, now, 0.08);
     }
 
-    // ── 7. Impacts & Landings ──
-    if (state.wasAirborneJustLanded) {
-      this.triggerLanding(now, absSpeed);
-    }
+    // ── 7. Barrier Collision Impacts ──
     if (state.impactSpeed > 2.0) {
       this.triggerBarrierImpact(now, state.impactSpeed);
     }
@@ -597,14 +580,6 @@ export class AudioEngine {
     this.ignitionOsc.frequency.exponentialRampToValueAtTime(45, now + 0.12);
     this.ignitionGain.gain.setValueAtTime(0.55, now);
     this.ignitionGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
-  }
-
-  private triggerLanding(now: number, speed: number): void {
-    const vol = Math.min(0.65, Math.max(0.15, speed / 40.0));
-    this.landingOsc.frequency.setValueAtTime(120, now);
-    this.landingOsc.frequency.exponentialRampToValueAtTime(38, now + 0.14);
-    this.landingGain.gain.setValueAtTime(vol, now);
-    this.landingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
   }
 
   private triggerBarrierImpact(now: number, impactSpeed: number): void {

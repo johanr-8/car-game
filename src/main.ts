@@ -34,7 +34,6 @@ const _audioState: AudioVehicleState = {
   isBoosting: false,
   isScrapingBarrier: false,
   barrierScrapeSpeed: 0,
-  wasAirborneJustLanded: false,
   impactSpeed: 0,
 };
 
@@ -153,7 +152,6 @@ function loop(): void {
   _audioState.isBoosting = player.controller.boostActive;
   _audioState.isScrapingBarrier = player.controller.isScrapingBarrier;
   _audioState.barrierScrapeSpeed = player.controller.barrierScrapeSpeed;
-  _audioState.wasAirborneJustLanded = player.controller.wasAirborneJustLanded;
   _audioState.impactSpeed = player.controller.lastImpactSpeed;
   audioEngine.update(dt, _audioState);
 }

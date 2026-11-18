@@ -25,6 +25,7 @@ export interface RaceProgress {
   wrongWayTimer: number;
   isWrongWay: boolean;
   progressU: number; // Lap + normalized spline progress for ranking
+  hasBarrierContact: boolean; // Barrier contact flag in current sector
 }
 
 const _interpPos = new THREE.Vector3();
@@ -48,6 +49,7 @@ export class VehicleEntity {
     wrongWayTimer: 0,
     isWrongWay: false,
     progressU: 0,
+    hasBarrierContact: false,
   };
 
   constructor(id: string = 'player', paintColor: number = 0xd41c1c, isPlayer: boolean = true) {
@@ -90,6 +92,8 @@ export class VehicleEntity {
     this.progress.wrongWayTimer = 0;
     this.progress.isWrongWay = false;
     this.progress.progressU = 0;
+    this.progress.hasBarrierContact = false;
+    this.controller.hasBarrierContact = false;
   }
 
   /**
@@ -103,14 +107,18 @@ export class VehicleEntity {
       this.controller.isGrounded,
       this.controller.surfaceNormal.y,
       this.controller.speed,
-      this.controller.isDrifting,
-      this.controller.wasAirborneJustLanded
+      this.controller.isDrifting
     );
     this.controller.boostActive = isBoosting;
     this.controller.boostForce = boostForce;
 
     // 2. Step vehicle dynamics
     this.controller.update(dt, input, collision);
+
+    // 3. Propagate barrier contact from controller collision probes
+    if (this.controller.hasBarrierContact) {
+      this.progress.hasBarrierContact = true;
+    }
   }
 
   /**

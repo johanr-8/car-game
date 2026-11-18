@@ -84,7 +84,7 @@ export class ArcadeCarController {
   // Boost and status effects
   boostActive = false;
   boostForce = 0;
-  wasAirborneJustLanded = false;
+  hasBarrierContact = false;
   lateralSlipSpeed = 0;       // magnitude of lateral sliding velocity (m/s)
   isScrapingBarrier = false;  // true while in active contact with a barrier
   barrierScrapeSpeed = 0;     // tangential velocity while scraping (m/s)
@@ -103,7 +103,6 @@ export class ArcadeCarController {
    * 120Hz fixed-timestep physics update.
    */
   update(dt: number, input: InputState, collision: CollisionWorld): void {
-    this.wasAirborneJustLanded = false;
     this.isScrapingBarrier = false;
     this.barrierScrapeSpeed = 0;
     this.lastImpactSpeed = 0;
@@ -127,11 +126,7 @@ export class ArcadeCarController {
     _fwdTan.crossVectors(this.surfaceNormal, _rightTan).normalize();
 
     // 4. Ground / Surface detection via BVH raycast
-    const wasAirborne = !this.isGrounded;
     this.detectSurface(collision);
-    if (wasAirborne && this.isGrounded) {
-      this.wasAirborneJustLanded = true;
-    }
 
     // 5. Arcade dynamics (Throttle, Brake, Steer, Grip, Boost)
     this.handleArcadeDynamics(dt, input);
@@ -354,13 +349,14 @@ export class ArcadeCarController {
     if (collision.raycast(_probePos, _probeDirL, sideReach, _hitSide)) {
       const penetration = (halfW + 0.04) - _hitSide.distance;
       if (penetration > 0) {
+        this.hasBarrierContact = true;
+        this.isScrapingBarrier = true;
+        this.barrierScrapeSpeed = Math.abs(this.speed);
         this.position.addScaledVector(_hitSide.normal, penetration);
         if (this.velocity.dot(_hitSide.normal) < 0) {
           this.velocity.projectOnPlane(_hitSide.normal);
         }
         this.speed *= 0.94; // slight friction on barrier brush
-        this.isScrapingBarrier = true;
-        this.barrierScrapeSpeed = Math.abs(this.speed);
       }
     }
 
@@ -368,13 +364,14 @@ export class ArcadeCarController {
     if (collision.raycast(_probePos, _rightTan, sideReach, _hitSide)) {
       const penetration = (halfW + 0.04) - _hitSide.distance;
       if (penetration > 0) {
+        this.hasBarrierContact = true;
+        this.isScrapingBarrier = true;
+        this.barrierScrapeSpeed = Math.abs(this.speed);
         this.position.addScaledVector(_hitSide.normal, penetration);
         if (this.velocity.dot(_hitSide.normal) < 0) {
           this.velocity.projectOnPlane(_hitSide.normal);
         }
         this.speed *= 0.94;
-        this.isScrapingBarrier = true;
-        this.barrierScrapeSpeed = Math.abs(this.speed);
       }
     }
 
@@ -420,6 +417,7 @@ export class ArcadeCarController {
           this.speed *= 0.85; // slight speed scrub on wall brush
           this.isScrapingBarrier = true;
           this.barrierScrapeSpeed = Math.abs(this.speed);
+          this.hasBarrierContact = true;
           const pushBack = Math.max(0.08, (sweepDist - _hitFwd.distance) + 0.04);
           this.position.addScaledVector(wallNormal, pushBack);
           return;

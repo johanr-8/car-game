@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import type { TrackSpline, Checkpoint } from './TrackSpline';
 import type { VehicleEntity } from '../car/VehicleEntity';
+import { CarConfig } from '../car/CarConfig';
 
 export interface TrackQueryResult {
   segmentIndex: number;
@@ -139,6 +140,9 @@ export class TrackQuery {
 
     const maxAllowedLat = 6.25; // 7.0m road half-width - 0.75m wheel margin
     if (Math.abs(result.lateralOffset) > maxAllowedLat) {
+      vehicle.progress.hasBarrierContact = true;
+      vehicle.controller.hasBarrierContact = true;
+
       const targetLat = Math.sign(result.lateralOffset) * maxAllowedLat;
       const correction = targetLat - result.lateralOffset;
       vehicle.controller.position.addScaledVector(result.binormal, correction);
@@ -146,13 +150,33 @@ export class TrackQuery {
       const latVel = vehicle.controller.velocity.dot(result.binormal);
       if (latVel * result.lateralOffset > 0) {
         vehicle.controller.velocity.addScaledVector(result.binormal, -latVel);
-        if (Math.abs(latVel) > 2.0) {
-          vehicle.controller.lastImpactSpeed = Math.max(vehicle.controller.lastImpactSpeed, Math.abs(latVel));
-        }
       }
-      vehicle.controller.isScrapingBarrier = true;
-      vehicle.controller.barrierScrapeSpeed = Math.abs(vehicle.controller.speed);
     }
+  }
+
+  /**
+   * Evaluates apex rumble-curb clipping:
+   * Driving over the inside rumble curb at speed above threshold while turning
+   * awards +3% boost, rate-limited by cooldown so it cannot be farmed.
+   */
+  checkApexBonus(vehicle: VehicleEntity): boolean {
+    if (!vehicle.controller.isGrounded) return false;
+    if (Math.abs(vehicle.controller.speed) < CarConfig.apexMinSpeed) return false;
+
+    // Use current cached query result
+    const latOffset = _cachedRes.lateralOffset;
+    const absLat = Math.abs(latOffset);
+
+    // Rumble curb is placed at lateral offset 4.8m to 6.25m
+    if (absLat < 4.8 || absLat > 6.25) return false;
+
+    // Must be actively steering towards the inside curb (apex clipping)
+    const steer = vehicle.controller.steerVisual;
+    if (Math.abs(steer) < 0.15) return false;
+    const turningTowardCurb = (steer * latOffset > 0);
+    if (!turningTowardCurb) return false;
+
+    return vehicle.boost.triggerApexBonus();
   }
 
   /**
