@@ -28,5 +28,7 @@ export function createComposer(
   composer.addPass(bloomPass);
   composer.addPass(outputPass);
 
+  (composer as any).bloomPass = bloomPass;
+
   return composer;
 }

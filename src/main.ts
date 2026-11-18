@@ -31,10 +31,11 @@ const scene = new THREE.Scene();
 const worldSystem = new WorldSystem(scene, renderer);
 const vehicleSystem = new VehicleSystem(scene, container.clientWidth / container.clientHeight);
 const hudSystem = new HudSystem();
-const raceSystem = new RaceSystem(worldSystem, vehicleSystem, hudSystem, renderer);
 
 // Post-Processing pipeline
 const composer = createComposer(renderer, scene, vehicleSystem.chaseCamera.camera);
+
+const raceSystem = new RaceSystem(worldSystem, vehicleSystem, hudSystem, renderer, composer);
 
 // Initial HUD seed badge
 hudSystem.raceHUD.setSeedBadge(
@@ -68,12 +69,14 @@ function loop(): void {
 
   const input = readInput();
 
-  if (input.restart) {
-    raceSystem.restartRace();
-  }
+  if (raceSystem.gameState !== GameState.MENU) {
+    if (input.restart) {
+      raceSystem.restartRace();
+    }
 
-  if (input.remix) {
-    raceSystem.remixCity();
+    if (input.remix) {
+      raceSystem.remixCity();
+    }
   }
 
   // ── Fixed-Timestep Physics (120 Hz) ──

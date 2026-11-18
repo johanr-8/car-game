@@ -26,6 +26,7 @@ export interface RaceProgress {
   isWrongWay: boolean;
   progressU: number; // Lap + normalized spline progress for ranking
   hasBarrierContact: boolean; // Barrier contact flag in current sector
+  lapTimes: number[]; // Completed lap times in seconds
 }
 
 const _interpPos = new THREE.Vector3();
@@ -50,6 +51,7 @@ export class VehicleEntity {
     isWrongWay: false,
     progressU: 0,
     hasBarrierContact: false,
+    lapTimes: [],
   };
 
   constructor(id: string = 'player', paintColor: number = 0xd41c1c, isPlayer: boolean = true) {
@@ -94,6 +96,7 @@ export class VehicleEntity {
     this.progress.progressU = 0;
     this.progress.hasBarrierContact = false;
     this.controller.hasBarrierContact = false;
+    this.progress.lapTimes = [];
   }
 
   /**

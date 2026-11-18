@@ -3,54 +3,87 @@
  * ─────────────────────────────────────────────────────────────
  * Race Progression & Game State Machine:
  *   - States: MENU, COUNTDOWN, RACING, FINISHED, PAUSED
- *   - Unified restartRace() reset function
+ *   - Main menu, pause menu, settings, controls, results orchestration
+ *   - GPU shader warm-up before countdown
  *   - Plane-crossing checkpoint gates with layer height checks
- *   - Lap records & 3-lap victory trigger
- *   - ESC pause menu orchestration
+ *   - Clean sector (+10%) & apex inside curb (+3%) rewards
+ *   - 3-lap championship victory & local Top 10 leaderboard persistence
+ *   - Conflict-free Escape, R, M, and F-key routing
  * ─────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
+import type { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { GameState } from './GameState';
 import type { WorldSystem } from './WorldSystem';
 import type { VehicleSystem } from './VehicleSystem';
 import type { HudSystem } from './HudSystem';
 import type { InputState } from '../core/InputManager';
+import { settings, type GraphicsQuality } from '../core/Settings';
 
 const START_POS = new THREE.Vector3(0, 0.94, 25);
 const START_QUAT = new THREE.Quaternion(0, 0, 0, 1);
 
 export class RaceSystem {
-  gameState: GameState = GameState.COUNTDOWN;
-  previousState: GameState = GameState.COUNTDOWN;
+  gameState: GameState = GameState.MENU;
+  previousState: GameState = GameState.MENU;
   countdownTimer = 3.0; // 3-2-1-GO!
 
   constructor(
     readonly worldSystem: WorldSystem,
     readonly vehicleSystem: VehicleSystem,
     readonly hudSystem: HudSystem,
-    readonly renderer: THREE.WebGLRenderer
+    readonly renderer: THREE.WebGLRenderer,
+    readonly composer?: EffectComposer
   ) {
-    // Wire UI callbacks
+    // 1. Wire Main Menu callbacks
+    this.hudSystem.mainMenu.onPlay = () => this.startRaceWithWarmUp();
+    this.hudSystem.mainMenu.onSettings = () => this.hudSystem.settingsModal.show();
+    this.hudSystem.mainMenu.onControls = () => this.hudSystem.controlsModal.show();
+
+    // 2. Wire Pause Menu callbacks
+    this.hudSystem.pauseMenu.onResume = () => this.resume();
+    this.hudSystem.pauseMenu.onRestart = () => this.restartRace();
+    this.hudSystem.pauseMenu.onSettings = () => this.hudSystem.settingsModal.show();
+    this.hudSystem.pauseMenu.onQuit = () => this.goToMenu();
+
+    // 3. Wire Results Modal callbacks
+    this.hudSystem.resultsModal.onRestart = () => this.restartRace();
+    this.hudSystem.resultsModal.onRemix = () => this.remixCity();
+    this.hudSystem.resultsModal.onMenu = () => this.goToMenu();
+
+    // 4. Wire Settings Modal callbacks
+    this.hudSystem.settingsModal.onGraphicsChanged = q => this.applyGraphicsQuality(q);
+    this.hudSystem.settingsModal.onCameraComfortChanged = c => {
+      this.vehicleSystem.chaseCamera.comfortMode = c;
+    };
+
+    // 5. Wire In-Game HUD callbacks
     this.hudSystem.raceHUD.onRestartRace = () => this.restartRace();
     this.hudSystem.raceHUD.onRemixCity = () => this.remixCity();
 
-    this.hudSystem.pauseMenu.onResume = () => this.resume();
-    this.hudSystem.pauseMenu.onRestart = () => this.restartRace();
-    this.hudSystem.pauseMenu.onBriefing = () => {
-      this.hudSystem.pauseMenu.hide();
-      this.hudSystem.raceHUD.toggleBriefing(true);
-    };
-    this.hudSystem.pauseMenu.onRemix = () => this.remixCity();
-
-    // Escape key listener for pausing
+    // 6. Escape key listener for clean modal closing and pausing
     window.addEventListener('keydown', e => {
       if (e.code === 'Escape') {
         e.preventDefault();
-        this.togglePause();
+
+        if (this.hudSystem.settingsModal.isVisible) {
+          this.hudSystem.settingsModal.close();
+        } else if (this.hudSystem.controlsModal.isVisible) {
+          this.hudSystem.controlsModal.hide();
+        } else if (this.gameState === GameState.PAUSED) {
+          this.resume();
+        } else if (this.gameState === GameState.RACING || this.gameState === GameState.COUNTDOWN) {
+          this.pause();
+        }
       }
     });
 
-    this.restartRace();
+    // 7. Apply saved graphics & camera comfort on boot
+    this.applyGraphicsQuality(settings.data.graphicsQuality);
+    this.vehicleSystem.chaseCamera.comfortMode = settings.data.cameraComfort;
+
+    // Start in Main Menu
+    this.goToMenu();
   }
 
   setGameState(newState: GameState): void {
@@ -62,6 +95,21 @@ export class RaceSystem {
       this.hudSystem.pauseMenu.show();
     } else {
       this.hudSystem.pauseMenu.hide();
+    }
+
+    if (newState === GameState.MENU) {
+      this.hudSystem.mainMenu.updateInfo(
+        this.worldSystem.currentSeed,
+        this.worldSystem.currentTheme.name,
+        settings.data.bestTotalTime
+      );
+      this.hudSystem.mainMenu.show();
+    } else {
+      this.hudSystem.mainMenu.hide();
+    }
+
+    if (newState !== GameState.FINISHED) {
+      this.hudSystem.resultsModal.hide();
     }
   }
 
@@ -84,39 +132,142 @@ export class RaceSystem {
     this.setGameState(resumeTo);
   }
 
+  goToMenu(): void {
+    this.setGameState(GameState.MENU);
+    this.hudSystem.pauseMenu.hide();
+    this.hudSystem.resultsModal.hide();
+    this.hudSystem.settingsModal.close();
+    this.hudSystem.controlsModal.hide();
+    this.hudSystem.raceHUD.hide();
+
+    this.hudSystem.mainMenu.updateInfo(
+      this.worldSystem.currentSeed,
+      this.worldSystem.currentTheme.name,
+      settings.data.bestTotalTime
+    );
+    this.hudSystem.mainMenu.show();
+  }
+
+  /**
+   * Starts race from Main Menu with GPU shader warm-up.
+   */
+  async startRaceWithWarmUp(): Promise<void> {
+    this.hudSystem.mainMenu.hide();
+    this.hudSystem.settingsModal.close();
+    this.hudSystem.controlsModal.hide();
+
+    this.vehicleSystem.resetAll(START_POS, START_QUAT);
+    this.worldSystem.track.resetCheckpoints();
+
+    // 1. Warm-up GPU shaders and compile materials
+    await this.hudSystem.loadingScreen.warmUp(
+      this.renderer,
+      this.worldSystem.scene,
+      this.vehicleSystem.chaseCamera.camera
+    );
+
+    // 2. Begin 3-2-1 Countdown
+    this.countdownTimer = 3.0;
+    this.setGameState(GameState.COUNTDOWN);
+
+    this.vehicleSystem.ghostRecorder.startLap();
+    this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
+  }
+
   /**
    * Unified reset: restores vehicles, checkpoints, timers, and cameras through one single pipeline.
    */
   restartRace(): void {
+    this.hudSystem.mainMenu.hide();
+    this.hudSystem.pauseMenu.hide();
+    this.hudSystem.resultsModal.hide();
+    this.hudSystem.settingsModal.close();
+    this.hudSystem.controlsModal.hide();
+
     this.vehicleSystem.resetAll(START_POS, START_QUAT);
     this.worldSystem.track.resetCheckpoints();
 
     this.countdownTimer = 3.0;
     this.setGameState(GameState.COUNTDOWN);
 
-    this.hudSystem.raceHUD.hideVictory();
-    this.hudSystem.pauseMenu.hide();
-
     this.vehicleSystem.ghostRecorder.startLap();
     this.vehicleSystem.ghostModel.setVisible(this.vehicleSystem.ghostRecorder.hasBestLap);
   }
 
-  remixCity(): void {
+  async remixCity(): Promise<void> {
     this.worldSystem.remixCity(this.renderer);
     this.hudSystem.raceHUD.setSeedBadge(
       this.worldSystem.currentSeed,
       this.worldSystem.currentTheme.name,
       this.worldSystem.isDaily
     );
-    this.restartRace();
+
+    this.applyGraphicsQuality(settings.data.graphicsQuality);
+
+    if (this.gameState === GameState.MENU) {
+      this.hudSystem.mainMenu.updateInfo(
+        this.worldSystem.currentSeed,
+        this.worldSystem.currentTheme.name,
+        settings.data.bestTotalTime
+      );
+    } else {
+      await this.startRaceWithWarmUp();
+    }
+  }
+
+  /**
+   * Applies graphics quality preset to renderer, shadows, bloom, and resolution scale.
+   */
+  applyGraphicsQuality(quality: GraphicsQuality): void {
+    const sun = this.worldSystem.sunLight;
+    const bloomPass = (this.composer as any)?.bloomPass;
+
+    switch (quality) {
+      case 'high':
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        if (sun.shadow.map) {
+          sun.shadow.map.dispose();
+          sun.shadow.map = null;
+        }
+        if (bloomPass) bloomPass.enabled = true;
+        if (typeof window !== 'undefined') {
+          this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.0));
+        }
+        break;
+
+      case 'medium':
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(1024, 1024);
+        if (sun.shadow.map) {
+          sun.shadow.map.dispose();
+          sun.shadow.map = null;
+        }
+        if (bloomPass) bloomPass.enabled = true;
+        if (typeof window !== 'undefined') {
+          this.renderer.setPixelRatio(Math.min((window.devicePixelRatio || 1) * 0.9, 1.5));
+        }
+        break;
+
+      case 'low':
+        this.renderer.shadowMap.enabled = false;
+        sun.castShadow = false;
+        if (bloomPass) bloomPass.enabled = false;
+        this.renderer.setPixelRatio(0.75);
+        break;
+    }
   }
 
   /**
    * Fixed 120Hz physics update for race lifecycle.
    */
   updatePhysics(dt: number, input: InputState): void {
-    // 0. Frozen while paused
-    if (this.gameState === GameState.PAUSED) return;
+    // 0. Frozen while paused or in main menu
+    if (this.gameState === GameState.PAUSED || this.gameState === GameState.MENU) return;
 
     // 1. Staging Countdown
     if (this.gameState === GameState.COUNTDOWN) {
@@ -185,6 +336,8 @@ export class RaceSystem {
             }
           } else if (v.progress.activeCheckpointIndex === 0) {
             // Lap complete!
+            v.progress.lapTimes.push(v.progress.currentLapTime);
+
             let isRecord = false;
             if (v.isPlayer) {
               isRecord = this.vehicleSystem.ghostRecorder.finishLap(v.progress.currentLapTime);
@@ -199,10 +352,12 @@ export class RaceSystem {
               // Championship victory!
               this.setGameState(GameState.FINISHED);
               if (v.isPlayer) {
-                this.hudSystem.raceHUD.showVictory(
-                  1,
+                this.hudSystem.raceHUD.hide();
+                this.hudSystem.resultsModal.showResults(
                   v.progress.totalRaceTime,
-                  this.vehicleSystem.ghostRecorder.bestLapTime
+                  v.progress.lapTimes,
+                  this.vehicleSystem.ghostRecorder.bestLapTime,
+                  this.worldSystem.currentSeed
                 );
               }
             } else {

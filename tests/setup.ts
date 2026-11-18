@@ -45,3 +45,21 @@ if (typeof window === 'undefined') {
     devicePixelRatio: 1,
   };
 }
+
+const memoryStore: Record<string, string> = {};
+const mockLocalStorage = {
+  getItem: (key: string) => (Object.prototype.hasOwnProperty.call(memoryStore, key) ? memoryStore[key] : null),
+  setItem: (key: string, val: string) => { memoryStore[key] = String(val); },
+  removeItem: (key: string) => { delete memoryStore[key]; },
+  clear: () => { Object.keys(memoryStore).forEach(k => delete memoryStore[k]); },
+};
+
+try {
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: mockLocalStorage,
+    configurable: true,
+    writable: true,
+  });
+} catch {
+  (globalThis as any).localStorage = mockLocalStorage;
+}

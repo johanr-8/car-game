@@ -538,6 +538,14 @@ export class RaceHUD {
     }
   }
 
+  show(): void {
+    this.root.style.display = 'block';
+  }
+
+  hide(): void {
+    this.root.style.display = 'none';
+  }
+
   setSeedBadge(seed: number, themeName: string, isDaily: boolean): void {
     const dailyTag = isDaily ? ' (DAILY)' : ' (REMIX)';
     this.elSeedBadge.textContent = `#${seed}${dailyTag} | ${themeName}`;

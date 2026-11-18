@@ -14,6 +14,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 import { CarConfig, DEFAULT_CAR_CONFIG } from '../car/CarConfig';
+import { isDevMode } from '../core/DevMode';
 
 const STORAGE_KEY = 'warp_drift_tuning';
 
@@ -96,9 +97,9 @@ export class DevTuningPanel {
     const btnClose = this.root.querySelector('#btn-close-tuning') as HTMLButtonElement;
     if (btnClose) btnClose.onclick = () => this.hide();
 
-    // Keydown listener for F4
+    // Keydown listener for F4 (only active in dev mode)
     window.addEventListener('keydown', e => {
-      if (e.code === 'F4') {
+      if (e.code === 'F4' && isDevMode()) {
         e.preventDefault();
         this.toggle();
       }

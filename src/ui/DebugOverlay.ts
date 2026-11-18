@@ -13,6 +13,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 import type { StatsCollector } from '../core/StatsCollector';
+import { isDevMode } from '../core/DevMode';
 import type * as THREE from 'three';
 
 export interface ProfileSnapshot {
@@ -114,9 +115,9 @@ export class DebugOverlay {
 
     document.body.appendChild(this.root);
 
-    // F3 toggle
+    // F3 toggle (only enabled in dev mode)
     window.addEventListener('keydown', e => {
-      if (e.code === 'F3') {
+      if (e.code === 'F3' && isDevMode()) {
         e.preventDefault();
         this.toggle();
       }
@@ -133,6 +134,7 @@ export class DebugOverlay {
 
   show(): void  { this.visible = true;  this.root.style.display = 'block'; }
   hide(): void  { this.visible = false; this.root.style.display = 'none'; }
+  get isVisible(): boolean { return this.visible; }
 
   /**
    * Continuous profiling update called once per rendered frame.

@@ -30,6 +30,7 @@ const _targetQuat  = new THREE.Quaternion();
 
 export class ChaseCamera {
   readonly camera: THREE.PerspectiveCamera;
+  comfortMode = false;
 
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(C.camFovMin, aspect, 0.1, 1400);
@@ -89,8 +90,8 @@ export class ChaseCamera {
     const rotLerp = 1 - Math.exp(-C.camLagLookAt * dt);
     this.camera.quaternion.slerp(_targetQuat, rotLerp);
 
-    // 6. Dynamic FOV widens with speed
-    const targetFov = THREE.MathUtils.lerp(C.camFovMin, C.camFovMax, speedNorm);
+    // 6. Dynamic FOV widens with speed (calmed when comfortMode is active)
+    const targetFov = this.comfortMode ? C.camFovMin : THREE.MathUtils.lerp(C.camFovMin, C.camFovMax, speedNorm);
     const fovLerp   = 1 - Math.exp(-C.camFovLag * dt);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, fovLerp);
     this.camera.updateProjectionMatrix();
