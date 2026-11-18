@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import type { WorldSpec } from './WorldConfig';
 import { SurfaceType } from './WorldConfig';
-import { SpatialRoadIndex, type RoadGraph } from './RoadNetwork';
+import { SpatialRoadIndex, RoadClass, type RoadGraph } from './RoadNetwork';
 import { Landforms } from './Landforms';
 
 export class TerrainHeight {
@@ -108,8 +108,11 @@ export class TerrainHeight {
         const d = nearest.distance;
         const w = nearest.roadHalfWidth;
 
-        // Centerline road elevation following landform profile
-        const roadH = this.landforms.getHeight(nearest.projectedX, nearest.projectedZ);
+        // Engineered road deck elevation with curve banking
+        let roadH = nearest.roadElevation;
+        if (nearest.bankAngle !== 0) {
+          roadH += nearest.signedLateral * Math.tan(nearest.bankAngle);
+        }
 
         // 1. Directly on road deck: +0.08m asphalt pavement thickness
         if (d <= w) {
@@ -122,7 +125,7 @@ export class TerrainHeight {
             const curbT = Math.min(1.0, (d - w) / 0.8);
             h = roadH + 0.08 * (1 - curbT);
           } else if (d < w + shoulderMargin + this.blendMargin) {
-            // 3. Embankment transition into natural landforms
+            // 3. Embankment cut-and-fill transition into natural landforms
             const u = (d - (w + shoulderMargin)) / this.blendMargin;
             const k = u * u * (3 - 2 * u); // Cubic smoothstep
             h = (1 - k) * roadH + k * rawH;
@@ -169,6 +172,9 @@ export class TerrainHeight {
     if (!nearest) return SurfaceType.GRASS;
 
     if (nearest.distance <= nearest.roadHalfWidth) {
+      if (nearest.edge.roadClass === RoadClass.DIRT) {
+        return SurfaceType.DIRT;
+      }
       return SurfaceType.ASPHALT;
     }
 

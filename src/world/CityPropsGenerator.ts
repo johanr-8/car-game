@@ -188,8 +188,10 @@ export class CityPropsGenerator {
         if (!nearest) continue;
 
         // Size & Footprint
-        const width = Math.round(rng.range(district.minLotSize, district.maxLotSize));
-        const depth = Math.round(rng.range(district.minLotSize, district.maxLotSize));
+        const isDowntown = district.type === DistrictType.DOWNTOWN;
+        const lotSize = Math.round(rng.range(district.minLotSize, district.maxLotSize));
+        const width = lotSize;
+        const depth = isDowntown ? lotSize : Math.round(rng.range(district.minLotSize, district.maxLotSize));
         const lotRadius = Math.hypot(width * 0.5, depth * 0.5);
 
         // Strict road clearance check:
@@ -210,7 +212,11 @@ export class CityPropsGenerator {
         // Building orientation: face towards nearest road
         const dx = nearest.projectedX - lotX;
         const dz = nearest.projectedZ - lotZ;
-        const rotY = Math.atan2(dx, dz);
+        let rotY = Math.atan2(dx, dz);
+        if (isDowntown) {
+          // Snap Downtown high-rise orientation to orthogonal street grid
+          rotY = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? Math.PI * 0.5 : -Math.PI * 0.5) : (dz > 0 ? 0 : Math.PI);
+        }
 
         // Transformation matrix
         const mat = new THREE.Matrix4();

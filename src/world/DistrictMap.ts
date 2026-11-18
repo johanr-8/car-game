@@ -15,6 +15,8 @@
  * ─────────────────────────────────────────────────────────────
  */
 import type { WorldSpec } from './WorldConfig';
+import { TownHub, TownType, type RoadGraph, generateTownHubs } from './RoadNetwork';
+import { Landforms } from './Landforms';
 
 export enum DistrictType {
   DOWNTOWN = 'DOWNTOWN',
@@ -192,47 +194,100 @@ class DistrictNoise2D {
 
 export class DistrictMap {
   readonly spec: WorldSpec;
+  readonly towns: TownHub[];
   private readonly noise: DistrictNoise2D;
 
-  constructor(spec: WorldSpec) {
+  constructor(spec: WorldSpec, roadGraph?: RoadGraph, landforms?: Landforms) {
     this.spec = spec;
     this.noise = new DistrictNoise2D(spec.seed + 101);
+    if (roadGraph?.towns && roadGraph.towns.length > 0) {
+      this.towns = roadGraph.towns;
+    } else {
+      const lf = landforms ?? new Landforms(spec);
+      this.towns = generateTownHubs(spec, lf);
+    }
   }
 
   /**
-   * Returns the district classification at world coordinates (x, z).
+   * Returns the district classification at world coordinates (x, z)
+   * derived from regional town hubs, industrial ports, farmland, and wilderness.
    */
   getDistrictAt(x: number, z: number): DistrictType {
-    const distSq = x * x + z * z;
-    const r = Math.sqrt(distSq);
+    // 1. Proximity to regional town hubs
+    let nearestTown: TownHub | null = null;
+    let minTownDist = Infinity;
 
-    // 1. Downtown High-Rises: Centered on map with slight organic boundary noise
-    const downtownBoundary = 400 + this.noise.sample(x * 0.003, z * 0.003) * 80;
-    if (r < downtownBoundary) {
-      return DistrictType.DOWNTOWN;
+    for (let i = 0; i < this.towns.length; i++) {
+      const t = this.towns[i];
+      const dist = Math.hypot(x - t.x, z - t.z);
+      if (dist < minTownDist) {
+        minTownDist = dist;
+        nearestTown = t;
+      }
     }
 
-    // 2. Open Green Area: One vast continuous nature reserve in the Northwest sector
-    // Bound to northwest region (x < -320 and z < -320) beyond inner city
-    if (x < -350 && z < -350 && r > 550) {
-      return DistrictType.OPEN_GREEN;
+    if (nearestTown) {
+      const r = minTownDist;
+      const baseR = nearestTown.radius;
+
+      // Organic perimeter boundary noise
+      const boundaryJitter = this.noise.sample(x * 0.003, z * 0.003) * 35;
+      const effectiveR = r + boundaryJitter;
+
+      // Downtown Hub: High-rise core, Midrise halo, Suburban neighborhoods
+      if (nearestTown.type === TownType.DOWNTOWN) {
+        if (effectiveR < baseR * 0.85) {
+          return DistrictType.DOWNTOWN;
+        }
+        if (effectiveR < baseR * 1.55) {
+          return DistrictType.MIDRISE;
+        }
+        if (effectiveR < baseR * 2.40) {
+          return DistrictType.SUBURBAN;
+        }
+      }
+
+      // Industrial & Port Hubs: Warehouses and freight logistics
+      else if (nearestTown.type === TownType.INDUSTRIAL || nearestTown.type === TownType.PORT) {
+        if (effectiveR < baseR * 1.15) {
+          return DistrictType.INDUSTRIAL;
+        }
+        if (effectiveR < baseR * 1.65) {
+          return DistrictType.SUBURBAN;
+        }
+      }
+
+      // Farm Hub: Agricultural fields and open meadows
+      else if (nearestTown.type === TownType.FARM) {
+        if (effectiveR < baseR * 1.30) {
+          return DistrictType.OPEN_GREEN;
+        }
+      }
+
+      // Summit Lookout: Alpine wilderness and mountain crags
+      else if (nearestTown.type === TownType.SUMMIT) {
+        return DistrictType.OPEN_GREEN;
+      }
+
+      // Smaller Regional Towns: Commercial center and residential suburbs
+      else if (nearestTown.type === TownType.TOWN) {
+        if (effectiveR < baseR * 0.65) {
+          return DistrictType.MIDRISE;
+        }
+        if (effectiveR < baseR * 1.55) {
+          return DistrictType.SUBURBAN;
+        }
+      }
     }
 
-    // 3. Multi-regional low-frequency district assignment
+    // 2. Parks in low flat areas / river valleys
     const n = this.noise.sample(x * 0.0012 + 150, z * 0.0012 + 250);
-
-    // Transitional inner ring (400m - 750m)
-    if (r < 750) {
-      if (n > 0.35) return DistrictType.PARK;
-      if (n > -0.20) return DistrictType.MIDRISE;
-      return DistrictType.SUBURBAN;
+    if (n > 0.42) {
+      return DistrictType.PARK;
     }
 
-    // Outer sectors (750m+)
-    if (n > 0.45) return DistrictType.PARK;
-    if (n > 0.10) return DistrictType.INDUSTRIAL;
-    if (n > -0.35) return DistrictType.SUBURBAN;
-    return DistrictType.MIDRISE;
+    // 3. Farmland and open nature outside towns
+    return DistrictType.OPEN_GREEN;
   }
 
   /**

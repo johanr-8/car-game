@@ -91,15 +91,16 @@ export class RoamWorld implements SurfaceProvider {
       this.currentTheme.hemiIntensity
     );
 
-    // 2. Generate Road Network & Spatial Index
-    this.roadGraph = generateRoadNetwork(this.spec);
+    // 2. Terrain Height Engine with Pure Landforms
+    this.terrainHeight = new TerrainHeight(this.spec);
+
+    // 3. Generate Terrain-Aware Road Network & Spatial Index
+    this.roadGraph = generateRoadNetwork(this.spec, this.terrainHeight.landforms);
     this.roadIndex = new SpatialRoadIndex(this.roadGraph, this.spec.chunkSize);
+    this.terrainHeight.setRoadIndex(this.roadIndex);
 
-    // 3. Terrain Height Engine (analytic elevation + road flattening)
-    this.terrainHeight = new TerrainHeight(this.spec, this.roadIndex);
-
-    // 4. District Map & Landmarks
-    this.districtMap = new DistrictMap(this.spec);
+    // 4. District Map derived from Regional Town Hubs
+    this.districtMap = new DistrictMap(this.spec, this.roadGraph, this.terrainHeight.landforms);
     this.landmarks = createLandmarkDefs(this.spec.chunkSize);
 
     // 5. Shared Global InstancedMesh Pools

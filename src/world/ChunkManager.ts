@@ -107,6 +107,33 @@ const yellowStripeMat = new THREE.MeshBasicMaterial({
   polygonOffsetUnits: -4,
 });
 
+const dirtRoadMat = new THREE.MeshStandardMaterial({
+  map: terrainDetailTex,
+  color: 0x826442,
+  roughness: 0.94,
+  metalness: 0.02,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
+});
+
+const guardrailMat = new THREE.MeshStandardMaterial({
+  color: 0xd4d8de,
+  roughness: 0.35,
+  metalness: 0.85,
+});
+
+const roundaboutCenterMat = new THREE.MeshStandardMaterial({
+  map: terrainDetailTex,
+  color: 0x3d702d,
+  roughness: 0.85,
+  metalness: 0.05,
+  polygonOffset: true,
+  polygonOffsetFactor: -3,
+  polygonOffsetUnits: -3,
+});
+
 // Two Levels of Detail (LOD 0: 32x32 full resolution, LOD 1: 16x16 half resolution)
 // Mesh resolution of 4m quads is sufficient for slopes up to 35+ degrees.
 // 4-meter perimeter seam skirts seal any T-junction gaps between LOD levels completely.
@@ -611,123 +638,198 @@ export class TerrainChunk {
     }
 
     const edges = roadIndex.getEdgesInChunk(cx, cz);
-    if (edges.length === 0) return;
-
     const chunkSize = spec.chunkSize;
-    const minChunkX = cx * chunkSize - 2;
-    const maxChunkX = (cx + 1) * chunkSize + 2;
-    const minChunkZ = cz * chunkSize - 2;
-    const maxChunkZ = (cz + 1) * chunkSize + 2;
+    const minChunkX = cx * chunkSize - 4;
+    const maxChunkX = (cx + 1) * chunkSize + 4;
+    const minChunkZ = cz * chunkSize - 4;
+    const maxChunkZ = (cz + 1) * chunkSize + 4;
 
     const nodes = roadIndex.graph.nodes;
 
+    // ── 1. Build Road Polylines & Draped Ribbons ──────────────
     for (let i = 0; i < edges.length; i++) {
       const edge = edges[i];
-      const nA = nodes[edge.fromNodeId];
-      const nB = nodes[edge.toNodeId];
+      const isDirt = edge.roadClass === RoadClass.DIRT;
+      const isMountain = edge.roadClass === RoadClass.MOUNTAIN;
+      const isHighway = edge.roadClass === RoadClass.HIGHWAY;
 
-      const dx = nB.x - nA.x;
-      const dz = nB.z - nA.z;
-      const len = Math.hypot(dx, dz);
-      if (len < 0.5) continue;
-
-      if (!clipSegmentAABB(nA.x, nA.z, nB.x, nB.z, minChunkX, maxChunkX, minChunkZ, maxChunkZ, _clipResult)) {
-        continue;
-      }
-
-      const t0 = _clipResult.t0;
-      const t1 = _clipResult.t1;
-      const segLen = len * (t1 - t0);
-      if (segLen < 0.2) continue;
-
-      const dirX = dx / len;
-      const dirZ = dz / len;
-      const perpX = -dirZ;
-      const perpZ = dirX;
+      // Select material based on road class
+      const roadMat = isDirt
+        ? dirtRoadMat
+        : isHighway
+        ? asphaltHighwayMat
+        : (edge.roadClass === RoadClass.MAIN || edge.roadClass === RoadClass.AVENUE)
+        ? asphaltAvenueMat
+        : asphaltLocalMat;
 
       const halfW = edge.width * 0.5;
-      const sw = edge.roadClass === RoadClass.HIGHWAY ? 2.0 : 2.5;
+      const sw = isHighway ? 2.0 : 2.5;
 
-      const subSteps = Math.max(2, Math.ceil(segLen / 10));
-      const ribbonPositions: number[] = [];
-      const ribbonUvs: number[] = [];
-      const stripePositions: number[] = [];
-      const stripeUvs: number[] = [];
-      const leftSidewalkPos: number[] = [];
-      const rightSidewalkPos: number[] = [];
-      const sidewalkUvs: number[] = [];
-
-      for (let s = 0; s <= subSteps; s++) {
-        const stepT = s / subSteps;
-        const t = t0 + stepT * (t1 - t0);
-        const cxPoint = nA.x + t * dx;
-        const czPoint = nA.z + t * dz;
-
-        // Road centerline elevation (ensures cross-section is 100% flat and level)
-        const roadY = terrainHeight.groundHeightAt(cxPoint, czPoint);
-        const swY = roadY + 0.04; // Raised concrete curb
-
-        const leftX = cxPoint - perpX * halfW;
-        const leftZ = czPoint - perpZ * halfW;
-        const rightX = cxPoint + perpX * halfW;
-        const rightZ = czPoint + perpZ * halfW;
-
-        ribbonPositions.push(leftX, roadY, leftZ, rightX, roadY, rightZ);
-
-        const vDist = (t * len) / 8.0;
-        ribbonUvs.push(0, vDist, 1, vDist);
-
-        // Center lane stripe points (+0.02 above asphalt surface)
-        const stripeHalfW = edge.roadClass === RoadClass.HIGHWAY ? 0.35 : 0.20;
-        const stripeY = roadY + 0.02;
-        stripePositions.push(
-          cxPoint - perpX * stripeHalfW, stripeY, czPoint - perpZ * stripeHalfW,
-          cxPoint + perpX * stripeHalfW, stripeY, czPoint + perpZ * stripeHalfW
-        );
-        stripeUvs.push(0, vDist, 1, vDist);
-
-        // Concrete Sidewalk Ribbons on both sides
-        const swLeftOuterX = leftX - perpX * sw;
-        const swLeftOuterZ = leftZ - perpZ * sw;
-        leftSidewalkPos.push(swLeftOuterX, swY, swLeftOuterZ, leftX, swY, leftZ);
-
-        const swRightOuterX = rightX + perpX * sw;
-        const swRightOuterZ = rightZ + perpZ * sw;
-        rightSidewalkPos.push(rightX, swY, rightZ, swRightOuterX, swY, swRightOuterZ);
-
-        sidewalkUvs.push(0, vDist, 1, vDist);
+      // Extract sub-segments: either from polyline points or straight segment
+      const subSegments: Array<{ x1: number; z1: number; x2: number; z2: number }> = [];
+      if (edge.points && edge.points.length >= 2) {
+        for (let p = 0; p < edge.points.length - 1; p++) {
+          subSegments.push({
+            x1: edge.points[p].x,
+            z1: edge.points[p].z,
+            x2: edge.points[p + 1].x,
+            z2: edge.points[p + 1].z,
+          });
+        }
+      } else {
+        const nA = nodes[edge.fromNodeId];
+        const nB = nodes[edge.toNodeId];
+        subSegments.push({ x1: nA.x, z1: nA.z, x2: nB.x, z2: nB.z });
       }
 
-      if (ribbonPositions.length >= 12) {
-        // Construct asphalt ribbon mesh
-        const ribbonGeo = this.createStripGeometry(ribbonPositions, ribbonUvs);
-        const mat = edge.roadClass === RoadClass.HIGHWAY
-          ? asphaltHighwayMat
-          : edge.roadClass === RoadClass.AVENUE
-          ? asphaltAvenueMat
-          : asphaltLocalMat;
+      for (let sIdx = 0; sIdx < subSegments.length; sIdx++) {
+        const seg = subSegments[sIdx];
+        const dx = seg.x2 - seg.x1;
+        const dz = seg.z2 - seg.z1;
+        const len = Math.hypot(dx, dz);
+        if (len < 0.4) continue;
 
-        const roadMesh = new THREE.Mesh(ribbonGeo, mat);
-        roadMesh.receiveShadow = true;
-        this.roadGroup.add(roadMesh);
+        if (!clipSegmentAABB(seg.x1, seg.z1, seg.x2, seg.z2, minChunkX, maxChunkX, minChunkZ, maxChunkZ, _clipResult)) {
+          continue;
+        }
 
-        // Construct center line stripe
-        const stripeGeo = this.createStripGeometry(stripePositions, stripeUvs);
-        const stripeMat = edge.roadClass === RoadClass.HIGHWAY ? yellowStripeMat : whiteStripeMat;
-        const stripeMesh = new THREE.Mesh(stripeGeo, stripeMat);
-        this.roadGroup.add(stripeMesh);
+        const t0 = _clipResult.t0;
+        const t1 = _clipResult.t1;
+        const segLen = len * (t1 - t0);
+        if (segLen < 0.2) continue;
 
-        // Construct Left Concrete Sidewalk
-        const leftSwGeo = this.createStripGeometry(leftSidewalkPos, sidewalkUvs);
-        const leftSwMesh = new THREE.Mesh(leftSwGeo, sidewalkMat);
-        leftSwMesh.receiveShadow = true;
-        this.roadGroup.add(leftSwMesh);
+        const dirX = dx / len;
+        const dirZ = dz / len;
+        const perpX = -dirZ;
+        const perpZ = dirX;
 
-        // Construct Right Concrete Sidewalk
-        const rightSwGeo = this.createStripGeometry(rightSidewalkPos, sidewalkUvs);
-        const rightSwMesh = new THREE.Mesh(rightSwGeo, sidewalkMat);
-        rightSwMesh.receiveShadow = true;
-        this.roadGroup.add(rightSwMesh);
+        const subSteps = Math.max(1, Math.ceil(segLen / 10));
+        const ribbonPositions: number[] = [];
+        const ribbonUvs: number[] = [];
+        const stripePositions: number[] = [];
+        const stripeUvs: number[] = [];
+        const leftSidewalkPos: number[] = [];
+        const rightSidewalkPos: number[] = [];
+        const sidewalkUvs: number[] = [];
+        const guardrailPos: number[] = [];
+
+        for (let s = 0; s <= subSteps; s++) {
+          const stepT = s / subSteps;
+          const t = t0 + stepT * (t1 - t0);
+          const cxPoint = seg.x1 + t * dx;
+          const czPoint = seg.z1 + t * dz;
+
+          // Road centerline elevation
+          const roadY = terrainHeight.groundHeightAt(cxPoint, czPoint);
+          const swY = roadY + 0.04;
+
+          const leftX = cxPoint - perpX * halfW;
+          const leftZ = czPoint - perpZ * halfW;
+          const rightX = cxPoint + perpX * halfW;
+          const rightZ = czPoint + perpZ * halfW;
+
+          ribbonPositions.push(leftX, roadY, leftZ, rightX, roadY, rightZ);
+
+          const vDist = (t * len) / 8.0;
+          ribbonUvs.push(0, vDist, 1, vDist);
+
+          // Center lane stripe points (skip on dirt roads)
+          if (!isDirt) {
+            const stripeHalfW = isHighway ? 0.35 : 0.20;
+            const stripeY = roadY + 0.02;
+            stripePositions.push(
+              cxPoint - perpX * stripeHalfW, stripeY, czPoint - perpZ * stripeHalfW,
+              cxPoint + perpX * stripeHalfW, stripeY, czPoint + perpZ * stripeHalfW
+            );
+            stripeUvs.push(0, vDist, 1, vDist);
+          }
+
+          // Sidewalks on urban/local/avenue roads
+          if (!isDirt && !isMountain) {
+            const swLeftOuterX = leftX - perpX * sw;
+            const swLeftOuterZ = leftZ - perpZ * sw;
+            leftSidewalkPos.push(swLeftOuterX, swY, swLeftOuterZ, leftX, swY, leftZ);
+
+            const swRightOuterX = rightX + perpX * sw;
+            const swRightOuterZ = rightZ + perpZ * sw;
+            rightSidewalkPos.push(rightX, swY, rightZ, swRightOuterX, swY, swRightOuterZ);
+
+            sidewalkUvs.push(0, vDist, 1, vDist);
+          }
+
+          // Metallic guardrails on mountain roads and steep drops
+          if (isMountain) {
+            const grY = roadY + 0.65;
+            const grX = rightX + perpX * 0.4;
+            const grZ = rightZ + perpZ * 0.4;
+            guardrailPos.push(grX, grY, grZ, grX, grY - 0.25, grZ);
+          }
+        }
+
+        if (ribbonPositions.length >= 12) {
+          // Construct road ribbon mesh
+          const ribbonGeo = this.createStripGeometry(ribbonPositions, ribbonUvs);
+          const roadMesh = new THREE.Mesh(ribbonGeo, roadMat);
+          roadMesh.receiveShadow = true;
+          this.roadGroup.add(roadMesh);
+
+          // Construct center stripe mesh
+          if (stripePositions.length >= 12) {
+            const stripeGeo = this.createStripGeometry(stripePositions, stripeUvs);
+            const stripeMat = isHighway ? yellowStripeMat : whiteStripeMat;
+            const stripeMesh = new THREE.Mesh(stripeGeo, stripeMat);
+            this.roadGroup.add(stripeMesh);
+          }
+
+          // Construct sidewalks
+          if (leftSidewalkPos.length >= 12) {
+            const leftSwGeo = this.createStripGeometry(leftSidewalkPos, sidewalkUvs);
+            const leftSwMesh = new THREE.Mesh(leftSwGeo, sidewalkMat);
+            leftSwMesh.receiveShadow = true;
+            this.roadGroup.add(leftSwMesh);
+
+            const rightSwGeo = this.createStripGeometry(rightSidewalkPos, sidewalkUvs);
+            const rightSwMesh = new THREE.Mesh(rightSwGeo, sidewalkMat);
+            rightSwMesh.receiveShadow = true;
+            this.roadGroup.add(rightSwMesh);
+          }
+
+          // Construct mountain guardrails
+          if (guardrailPos.length >= 12) {
+            const grGeo = this.createStripGeometry(guardrailPos);
+            const grMesh = new THREE.Mesh(grGeo, guardrailMat);
+            this.roadGroup.add(grMesh);
+          }
+        }
+      }
+    }
+
+    // ── 2. Intersections & Roundabouts Deck Patches ───────────
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (node.x >= minChunkX && node.x <= maxChunkX && node.z >= minChunkZ && node.z <= maxChunkZ) {
+        if (node.isJunction) {
+          const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
+          const patchGeo = new THREE.CircleGeometry(11.0, 16);
+          patchGeo.rotateX(-Math.PI * 0.5);
+          const patchMesh = new THREE.Mesh(patchGeo, asphaltAvenueMat);
+          patchMesh.position.set(node.x, patchY, node.z);
+          patchMesh.receiveShadow = true;
+          this.roadGroup.add(patchMesh);
+        } else if (node.isRoundabout) {
+          const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
+          const outerGeo = new THREE.RingGeometry(6.0, 16.0, 24);
+          outerGeo.rotateX(-Math.PI * 0.5);
+          const outerMesh = new THREE.Mesh(outerGeo, asphaltAvenueMat);
+          outerMesh.position.set(node.x, patchY, node.z);
+          this.roadGroup.add(outerMesh);
+
+          const innerGeo = new THREE.CircleGeometry(6.0, 24);
+          innerGeo.rotateX(-Math.PI * 0.5);
+          const innerMesh = new THREE.Mesh(innerGeo, roundaboutCenterMat);
+          innerMesh.position.set(node.x, patchY + 0.12, node.z);
+          this.roadGroup.add(innerMesh);
+        }
       }
     }
   }
