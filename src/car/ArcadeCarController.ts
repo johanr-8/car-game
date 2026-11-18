@@ -85,10 +85,6 @@ export class ArcadeCarController {
   boostActive = false;
   boostForce = 0;
   hasBarrierContact = false;
-  lateralSlipSpeed = 0;       // magnitude of lateral sliding velocity (m/s)
-  isScrapingBarrier = false;  // true while in active contact with a barrier
-  barrierScrapeSpeed = 0;     // tangential velocity while scraping (m/s)
-  lastImpactSpeed = 0;        // impact velocity magnitude from recent collision
 
   // ── Interpolation State (for α-rendering) ───────────────────
   readonly prevPosition = new THREE.Vector3(0, 0.94, 25);
@@ -103,10 +99,6 @@ export class ArcadeCarController {
    * 120Hz fixed-timestep physics update.
    */
   update(dt: number, input: InputState, collision: CollisionWorld): void {
-    this.isScrapingBarrier = false;
-    this.barrierScrapeSpeed = 0;
-    this.lastImpactSpeed = 0;
-
     // 1. Snapshot previous state for interpolated rendering
     this.prevPosition.copy(this.position);
     this.prevQuaternion.copy(this.quaternion);
@@ -317,7 +309,6 @@ export class ArcadeCarController {
       _fwdVel.copy(_fwdTan).multiplyScalar(this.speed);
       _latVel.copy(_rightTan).multiplyScalar(latSpeed);
       this.velocity.copy(_fwdVel).add(_latVel);
-      this.lateralSlipSpeed = Math.abs(latSpeed);
 
     } else {
       // ── Airborne Flight Dynamics ──
@@ -350,8 +341,6 @@ export class ArcadeCarController {
       const penetration = (halfW + 0.04) - _hitSide.distance;
       if (penetration > 0) {
         this.hasBarrierContact = true;
-        this.isScrapingBarrier = true;
-        this.barrierScrapeSpeed = Math.abs(this.speed);
         this.position.addScaledVector(_hitSide.normal, penetration);
         if (this.velocity.dot(_hitSide.normal) < 0) {
           this.velocity.projectOnPlane(_hitSide.normal);
@@ -365,8 +354,6 @@ export class ArcadeCarController {
       const penetration = (halfW + 0.04) - _hitSide.distance;
       if (penetration > 0) {
         this.hasBarrierContact = true;
-        this.isScrapingBarrier = true;
-        this.barrierScrapeSpeed = Math.abs(this.speed);
         this.position.addScaledVector(_hitSide.normal, penetration);
         if (this.velocity.dot(_hitSide.normal) < 0) {
           this.velocity.projectOnPlane(_hitSide.normal);
@@ -413,10 +400,7 @@ export class ArcadeCarController {
 
           // Perpendicular obstacle/wall deflection: glide along the wall without locking up
           this.velocity.projectOnPlane(wallNormal);
-          this.lastImpactSpeed = Math.max(this.lastImpactSpeed, Math.abs(this.speed));
           this.speed *= 0.85; // slight speed scrub on wall brush
-          this.isScrapingBarrier = true;
-          this.barrierScrapeSpeed = Math.abs(this.speed);
           this.hasBarrierContact = true;
           const pushBack = Math.max(0.08, (sweepDist - _hitFwd.distance) + 0.04);
           this.position.addScaledVector(wallNormal, pushBack);

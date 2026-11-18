@@ -21,21 +21,6 @@ import { createRenderer } from './core/Renderer';
 import { createComposer } from './core/PostProcessing';
 import { readInput } from './core/InputManager';
 import { WorldSystem, VehicleSystem, HudSystem, RaceSystem, GameState } from './systems';
-import { audioEngine, type AudioVehicleState } from './audio';
-
-// ── Scratch Objects for Zero Per-Frame Allocations ───────────
-const _audioState: AudioVehicleState = {
-  speed: 0,
-  throttle: 0,
-  brake: 0,
-  isGrounded: true,
-  lateralSlipSpeed: 0,
-  isDrifting: false,
-  isBoosting: false,
-  isScrapingBarrier: false,
-  barrierScrapeSpeed: 0,
-  impactSpeed: 0,
-};
 
 // ── Scene & WebGL Renderer ───────────────────────────────────
 const container = document.getElementById('canvas-container') as HTMLElement;
@@ -141,19 +126,6 @@ function loop(): void {
     dtMs,
     renderer
   );
-
-  // 5. Procedural Web Audio Engine update (zero allocations)
-  _audioState.speed = player.controller.speed;
-  _audioState.throttle = input.throttle;
-  _audioState.brake = input.brake;
-  _audioState.isGrounded = player.controller.isGrounded;
-  _audioState.lateralSlipSpeed = player.controller.lateralSlipSpeed;
-  _audioState.isDrifting = player.controller.isDrifting;
-  _audioState.isBoosting = player.controller.boostActive;
-  _audioState.isScrapingBarrier = player.controller.isScrapingBarrier;
-  _audioState.barrierScrapeSpeed = player.controller.barrierScrapeSpeed;
-  _audioState.impactSpeed = player.controller.lastImpactSpeed;
-  audioEngine.update(dt, _audioState);
 }
 
 loop();
