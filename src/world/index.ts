@@ -10,3 +10,4 @@ export { CITY_THEMES }       from './TimeOfDay';
 export type { CityTheme }     from './TimeOfDay';
 export { TrackSpline }       from './TrackSpline';
 export type { Checkpoint }   from './TrackSpline';
+export { TrackQuery, type TrackQueryResult } from './TrackQuery';

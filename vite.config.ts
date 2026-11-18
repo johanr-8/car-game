@@ -11,6 +11,7 @@ export default defineConfig({
       '@world':   '/src/world',
       '@ui':      '/src/ui',
       '@audio':   '/src/audio',
+      '@systems': '/src/systems',
     },
   },
   build: {

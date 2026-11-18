@@ -8,3 +8,4 @@ export { ChaseCamera }           from './ChaseCamera';
 export { GhostRecorder }         from './GhostRecorder';
 export { GhostModel }            from './GhostModel';
 export { BoostSystem }           from './BoostSystem';
+export { VehicleEntity, type RaceProgress } from './VehicleEntity';

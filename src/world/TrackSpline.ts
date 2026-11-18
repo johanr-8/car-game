@@ -24,6 +24,8 @@ export interface Checkpoint {
   label: string;
   position: THREE.Vector3;
   direction: THREE.Vector3;
+  normal: THREE.Vector3;
+  binormal: THREE.Vector3;
   radius: number;
   gateGroup: THREE.Group;
   matRing: THREE.MeshStandardMaterial;
@@ -534,6 +536,8 @@ export class TrackSpline {
         label: def.label,
         position: pt.clone(),
         direction: tangent.clone(),
+        normal: normal.clone(),
+        binormal: binormal.clone(),
         radius: def.radius,
         gateGroup,
         matRing: ledMat,

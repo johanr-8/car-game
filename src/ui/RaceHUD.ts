@@ -30,6 +30,7 @@ export class RaceHUD {
 
   private readonly elSeedBadge:   HTMLDivElement;
   private readonly elInversion:   HTMLDivElement;
+  private readonly elWrongWay:    HTMLDivElement;
 
   private readonly elBoostBar:    HTMLDivElement;
   private readonly elTrickPopup:  HTMLDivElement;
@@ -39,6 +40,22 @@ export class RaceHUD {
 
   private readonly elBanner:      HTMLDivElement;
   private bannerTimer = 0;
+
+  // ── Dirty-Checking State Caches (Zero DOM layout thrashing) ─
+  private lastLapCentis = -1;
+  private lastLapTimeStr = '';
+  private lastBestCentis = -1;
+  private lastBestTimeStr = '';
+  private lastLapCount = -1;
+  private lastCheckpoint = -1;
+  private lastTotalCheckpoints = -1;
+  private lastPositionStr = '';
+  private lastSpeedRounded = -1;
+  private lastBoostRounded = -1;
+  private lastIsBoosting: boolean | null = null;
+  private lastHasGhost: boolean | null = null;
+  private lastIsInverted: boolean | null = null;
+  private lastIsWrongWay: boolean | null = null;
 
   // Mission Briefing & Victory Overlays
   private readonly elBriefingModal: HTMLDivElement;
@@ -200,6 +217,27 @@ export class RaceHUD {
     } as Partial<CSSStyleDeclaration>);
     this.elInversion.textContent = '⚠ GRAVITY INVERTED — SKY IS ROAD ⚠';
     this.root.appendChild(this.elInversion);
+
+    // ── 3b. Center Wrong Way Alert Banner ───────────────────
+    this.elWrongWay = document.createElement('div');
+    Object.assign(this.elWrongWay.style, {
+      position:      'absolute',
+      top:           '125px',
+      left:          '50%',
+      transform:     'translateX(-50%)',
+      padding:       '8px 26px',
+      background:    'rgba(220, 38, 38, 0.95)',
+      border:        '2px solid #ffffff',
+      borderRadius:  '6px',
+      fontSize:      '15px',
+      fontWeight:    '900',
+      letterSpacing: '2px',
+      color:         '#ffffff',
+      display:       'none',
+      boxShadow:     '0 4px 20px rgba(220, 38, 38, 0.7)',
+    } as Partial<CSSStyleDeclaration>);
+    this.elWrongWay.textContent = '⛔ WRONG WAY — TURN AROUND ⛔';
+    this.root.appendChild(this.elWrongWay);
 
     // ── 4. Bottom Right: Speedometer & Telemetry ─────────────
     const bottomBox = document.createElement('div');
@@ -506,7 +544,17 @@ export class RaceHUD {
   }
 
   setInversionAlert(active: boolean): void {
-    this.elInversion.style.display = active ? 'block' : 'none';
+    if (this.lastIsInverted !== active) {
+      this.lastIsInverted = active;
+      this.elInversion.style.display = active ? 'block' : 'none';
+    }
+  }
+
+  setWrongWayAlert(active: boolean): void {
+    if (this.lastIsWrongWay !== active) {
+      this.lastIsWrongWay = active;
+      this.elWrongWay.style.display = active ? 'block' : 'none';
+    }
   }
 
   showTrickPopup(text: string): void {
@@ -526,7 +574,7 @@ export class RaceHUD {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     const ms = Math.floor((seconds % 1) * 1000);
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}.${ms < 100 ? (ms < 10 ? '00' : '0') : ''}${ms}`;
   }
 
   update(options: {
@@ -541,6 +589,7 @@ export class RaceHUD {
     isBoosting: boolean;
     hasGhost: boolean;
     isInverted: boolean;
+    isWrongWay?: boolean;
     dt: number;
   }): void {
     const {
@@ -550,39 +599,97 @@ export class RaceHUD {
       activeCheckpoint,
       totalCheckpoints,
       speedKmh,
+      positionRank,
       boostCharge,
       isBoosting,
       hasGhost,
       isInverted,
+      isWrongWay,
       dt,
     } = options;
 
-    this.elLapTime.textContent    = this.formatTime(currentLapTime);
-    this.elBestTime.textContent   = bestLapTime !== null ? this.formatTime(bestLapTime) : '--:--.---';
-    this.elLapCount.textContent   = `${Math.min(3, lapCount)} / 3`;
-    this.elCheckpoints.textContent= `${activeCheckpoint} / ${totalCheckpoints}`;
-    this.elPosition.textContent   = 'SOLO TRIAL';
+    // 1. Lap Time (Dirty check on centisecond)
+    const lapCentis = Math.floor(currentLapTime * 100);
+    if (lapCentis !== this.lastLapCentis) {
+      this.lastLapCentis = lapCentis;
+      this.lastLapTimeStr = this.formatTime(currentLapTime);
+      this.elLapTime.textContent = this.lastLapTimeStr;
+    }
 
-    // Smooth digital tachometer response (avoids erratic number jumps)
+    // 2. Best Lap Time
+    if (bestLapTime !== null) {
+      const bestCentis = Math.floor(bestLapTime * 100);
+      if (bestCentis !== this.lastBestCentis) {
+        this.lastBestCentis = bestCentis;
+        this.lastBestTimeStr = this.formatTime(bestLapTime);
+        this.elBestTime.textContent = this.lastBestTimeStr;
+      }
+    } else if (this.lastBestCentis !== -999) {
+      this.lastBestCentis = -999;
+      this.elBestTime.textContent = '--:--.---';
+    }
+
+    // 3. Lap Count
+    if (lapCount !== this.lastLapCount) {
+      this.lastLapCount = lapCount;
+      this.elLapCount.textContent = `${Math.min(3, lapCount)} / 3`;
+    }
+
+    // 4. Checkpoints
+    if (activeCheckpoint !== this.lastCheckpoint || totalCheckpoints !== this.lastTotalCheckpoints) {
+      this.lastCheckpoint = activeCheckpoint;
+      this.lastTotalCheckpoints = totalCheckpoints;
+      this.elCheckpoints.textContent = `${activeCheckpoint} / ${totalCheckpoints}`;
+    }
+
+    // 5. Position Rank
+    const posStr = positionRank !== undefined ? `${positionRank} / 1` : 'SOLO TRIAL';
+    if (posStr !== this.lastPositionStr) {
+      this.lastPositionStr = posStr;
+      this.elPosition.textContent = posStr;
+    }
+
+    // 6. Smooth digital tachometer response with integer dirty check
     this.displaySpeed = THREE.MathUtils.lerp(this.displaySpeed, Math.abs(speedKmh), Math.min(1, 10 * dt));
-    this.elSpeed.textContent      = `${Math.round(this.displaySpeed)} KM/H`;
-
-    this.elBoostBar.style.width   = `${Math.max(0, Math.min(100, boostCharge))}%`;
-    if (isBoosting) {
-      this.elBoostBar.style.background = 'linear-gradient(90deg, #f59e0b, #38bdf8)';
-    } else {
-      this.elBoostBar.style.background = 'linear-gradient(90deg, #0284c7, #38bdf8)';
+    const speedRounded = Math.round(this.displaySpeed);
+    if (speedRounded !== this.lastSpeedRounded) {
+      this.lastSpeedRounded = speedRounded;
+      this.elSpeed.textContent = `${speedRounded} KM/H`;
     }
 
-    if (hasGhost) {
-      this.elGhostState.textContent = 'GHOST: REPLAYING';
-      this.elGhostState.style.color = '#a855f7';
-    } else {
-      this.elGhostState.textContent = 'GHOST: RECORDING';
-      this.elGhostState.style.color = '#64748b';
+    // 7. Boost Bar width and gradient
+    const boostRounded = Math.round(Math.max(0, Math.min(100, boostCharge)));
+    if (boostRounded !== this.lastBoostRounded) {
+      this.lastBoostRounded = boostRounded;
+      this.elBoostBar.style.width = `${boostRounded}%`;
     }
 
+    if (isBoosting !== this.lastIsBoosting) {
+      this.lastIsBoosting = isBoosting;
+      this.elBoostBar.style.background = isBoosting
+        ? 'linear-gradient(90deg, #f59e0b, #38bdf8)'
+        : 'linear-gradient(90deg, #0284c7, #38bdf8)';
+    }
+
+    // 8. Ghost State
+    if (hasGhost !== this.lastHasGhost) {
+      this.lastHasGhost = hasGhost;
+      if (hasGhost) {
+        this.elGhostState.textContent = 'GHOST: REPLAYING';
+        this.elGhostState.style.color = '#a855f7';
+      } else {
+        this.elGhostState.textContent = 'GHOST: RECORDING';
+        this.elGhostState.style.color = '#64748b';
+      }
+    }
+
+    // 9. Inversion Alert
     this.setInversionAlert(isInverted);
+
+    // 10. Wrong Way Alert
+    if (isWrongWay !== undefined) {
+      this.setWrongWayAlert(isWrongWay);
+    }
 
     if (this.trickTimer > 0) {
       this.trickTimer -= dt;

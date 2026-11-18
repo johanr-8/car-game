@@ -15,7 +15,8 @@
       "@car/*":  ["./src/car/*"],
       "@world/*": ["./src/world/*"],
       "@ui/*":   ["./src/ui/*"],
-      "@audio/*": ["./src/audio/*"]
+      "@audio/*": ["./src/audio/*"],
+      "@systems/*": ["./src/systems/*"]
     }
   },
   "include": ["src"]
