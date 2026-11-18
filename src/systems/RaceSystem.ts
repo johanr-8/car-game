@@ -252,6 +252,7 @@ export class RaceSystem {
    */
   startRoam(): void {
     this.gameMode = GameMode.ROAM;
+    this.countdownTimer = -999;
     this.hudSystem.raceHUD.setMode(GameMode.ROAM);
 
     this.hudSystem.mainMenu.hide();
@@ -273,6 +274,7 @@ export class RaceSystem {
    * Respawns car at Free Roam spawn point.
    */
   respawnRoam(): void {
+    this.countdownTimer = -999;
     this.vehicleSystem.respawnRoam();
     if (this.gameState === GameState.PAUSED) {
       this.resume();

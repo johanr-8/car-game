@@ -13,7 +13,7 @@ import {
   SpatialRoadIndex,
 } from '../src/world/RoadNetwork';
 import { TerrainHeight } from '../src/world/TerrainHeight';
-import { ChunkManager } from '../src/world/ChunkManager';
+import { ChunkManager, TerrainChunk } from '../src/world/ChunkManager';
 import { ArcadeCarController } from '../src/car/ArcadeCarController';
 import { FIXED_DT } from '../src/core/constants';
 import type { InputState } from '../src/core/InputManager';
@@ -295,5 +295,52 @@ describe('Free Roam: Chunk Streaming & Budgeting', () => {
     // Chunks far behind are unloaded due to unloadRadius hysteresis
     chunkManager.dispose();
     expect(chunkManager.loadedCount).toBe(0);
+  });
+
+  it('builds road ribbon geometry with upward-facing normals, UVs, double-side materials, and polygon offset', () => {
+    const graph = generateRoadNetwork(DEFAULT_WORLD_SPEC);
+    const roadIndex = new SpatialRoadIndex(graph, DEFAULT_WORLD_SPEC.chunkSize);
+    const terrain = new TerrainHeight(DEFAULT_WORLD_SPEC, roadIndex);
+
+    // Chunk (-7, -7) contains the diagonal highway where car spawns (-800, -800)
+    const cx = Math.floor(-800 / DEFAULT_WORLD_SPEC.chunkSize);
+    const cz = Math.floor(-800 / DEFAULT_WORLD_SPEC.chunkSize);
+
+    const chunk = new TerrainChunk();
+    chunk.build(cx, cz, terrain, roadIndex, DEFAULT_WORLD_SPEC);
+
+    // Terrain grid has UV attribute
+    const terrainUv = chunk.terrainGeo.getAttribute('uv');
+    expect(terrainUv).toBeDefined();
+    expect(terrainUv.count).toBeGreaterThan(1000);
+
+    // Road group has children (asphalt ribbons and stripes)
+    expect(chunk.roadGroup.children.length).toBeGreaterThanOrEqual(2);
+
+    const roadMesh = chunk.roadGroup.children[0] as THREE.Mesh;
+    const roadGeo = roadMesh.geometry;
+    const roadNormAttr = roadGeo.getAttribute('normal');
+    const roadUvAttr = roadGeo.getAttribute('uv');
+
+    expect(roadNormAttr).toBeDefined();
+    expect(roadUvAttr).toBeDefined();
+
+    // Normal MUST point UPWARDS (+Y), not downwards into the earth
+    for (let i = 0; i < roadNormAttr.count; i++) {
+      const ny = roadNormAttr.getY(i);
+      expect(ny).toBeGreaterThan(0.7); // Near vertical upward normal
+    }
+
+    // Material properties: DoubleSide and polygonOffset enabled to eliminate backface culling & z-fighting
+    const roadMat = roadMesh.material as THREE.MeshStandardMaterial;
+    expect(roadMat.side).toBe(THREE.DoubleSide);
+    expect(roadMat.polygonOffset).toBe(true);
+
+    const stripeMesh = chunk.roadGroup.children[1] as THREE.Mesh;
+    const stripeMat = stripeMesh.material as THREE.MeshBasicMaterial;
+    expect(stripeMat.side).toBe(THREE.DoubleSide);
+    expect(stripeMat.polygonOffset).toBe(true);
+
+    chunk.recycle();
   });
 });

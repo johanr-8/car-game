@@ -40,7 +40,6 @@ export class RoamWorld implements SurfaceProvider {
   // Atmosphere & Lighting
   readonly sunLight: THREE.DirectionalLight;
   readonly hemiLight: THREE.HemisphereLight;
-  readonly fillLight: THREE.DirectionalLight;
   readonly currentTheme: CityTheme;
 
   constructor(
@@ -71,9 +70,6 @@ export class RoamWorld implements SurfaceProvider {
       this.currentTheme.hemiGroundColor,
       this.currentTheme.hemiIntensity
     );
-
-    this.fillLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    this.fillLight.position.set(-80, 100, -80);
 
     // 2. Generate Road Network & Spatial Index
     this.roadGraph = generateRoadNetwork(this.spec);
@@ -106,7 +102,6 @@ export class RoamWorld implements SurfaceProvider {
     scene.add(this.visualGroup);
     scene.add(this.sunLight);
     scene.add(this.hemiLight);
-    scene.add(this.fillLight);
     scene.fog = new THREE.FogExp2(this.currentTheme.fogColor, this.currentTheme.fogDensity);
   }
 
@@ -114,7 +109,6 @@ export class RoamWorld implements SurfaceProvider {
     scene.remove(this.visualGroup);
     scene.remove(this.sunLight);
     scene.remove(this.hemiLight);
-    scene.remove(this.fillLight);
   }
 
   /**

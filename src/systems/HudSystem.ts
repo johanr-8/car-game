@@ -91,7 +91,7 @@ export class HudSystem {
     // 3. Telemetry HUD visibility
     if (gameState === GameState.COUNTDOWN || gameState === GameState.RACING || gameState === GameState.ROAMING) {
       this.raceHUD.show();
-      if (gameState === GameState.COUNTDOWN || countdownTimer > -1.0) {
+      if (gameState === GameState.COUNTDOWN || (gameState !== GameState.ROAMING && countdownTimer > -1.0)) {
         this.raceHUD.updateCountdown(countdownTimer);
       } else {
         this.raceHUD.updateCountdown(-999);

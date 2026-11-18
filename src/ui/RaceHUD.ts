@@ -540,7 +540,13 @@ export class RaceHUD {
     this.elVictoryOverlay.style.display = 'none';
   }
 
+  currentMode: GameMode = GameMode.RACE;
+
   updateCountdown(countdownTime: number): void {
+    if (this.currentMode === GameMode.ROAM || countdownTime <= -0.7) {
+      this.elCountdown.style.display = 'none';
+      return;
+    }
     if (countdownTime > 0) {
       this.elCountdown.style.display = 'block';
       if (countdownTime > 2.0) {
@@ -571,6 +577,7 @@ export class RaceHUD {
   }
 
   setMode(mode: GameMode): void {
+    this.currentMode = mode;
     const isRoam = mode === GameMode.ROAM;
     this.topBar.style.display = isRoam ? 'none' : 'flex';
     this.elSeedBadge.style.display = isRoam ? 'none' : 'block';

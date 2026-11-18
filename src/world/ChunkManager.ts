@@ -19,35 +19,76 @@ import type { WorldSpec } from './WorldConfig';
 import type { TerrainHeight } from './TerrainHeight';
 import type { SpatialRoadIndex } from './RoadNetwork';
 import { RoadClass } from './RoadNetwork';
+import { getAsphaltTexture, getGrassTexture } from './TextureGenerator';
+
+// Cloned textures for Free Roam procedural terrain and roads
+const roamGrassTex = getGrassTexture().clone();
+roamGrassTex.wrapS = THREE.RepeatWrapping;
+roamGrassTex.wrapT = THREE.RepeatWrapping;
+roamGrassTex.repeat.set(1, 1);
+
+const roamAsphaltTex = getAsphaltTexture().clone();
+roamAsphaltTex.wrapS = THREE.RepeatWrapping;
+roamAsphaltTex.wrapT = THREE.RepeatWrapping;
+roamAsphaltTex.repeat.set(1, 1);
 
 // Shared Materials (Created once, cached at module scope)
 const terrainMat = new THREE.MeshStandardMaterial({
+  map: roamGrassTex,
   vertexColors: true,
-  roughness: 0.85,
-  metalness: 0.05,
+  roughness: 0.88,
+  metalness: 0.04,
   flatShading: false,
 });
 
 const asphaltHighwayMat = new THREE.MeshStandardMaterial({
-  color: 0x18191c,
-  roughness: 0.70,
-  metalness: 0.20,
+  map: roamAsphaltTex,
+  color: 0x343a46,
+  roughness: 0.72,
+  metalness: 0.12,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
 });
 
 const asphaltAvenueMat = new THREE.MeshStandardMaterial({
-  color: 0x1f2126,
+  map: roamAsphaltTex,
+  color: 0x3d4350,
   roughness: 0.75,
-  metalness: 0.15,
+  metalness: 0.10,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
 });
 
 const asphaltLocalMat = new THREE.MeshStandardMaterial({
-  color: 0x24272c,
+  map: roamAsphaltTex,
+  color: 0x484e5c,
   roughness: 0.80,
-  metalness: 0.10,
+  metalness: 0.08,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
 });
 
-const whiteStripeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-const yellowStripeMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+const whiteStripeMat = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -4,
+  polygonOffsetUnits: -4,
+});
+
+const yellowStripeMat = new THREE.MeshBasicMaterial({
+  color: 0xfacc15,
+  side: THREE.DoubleSide,
+  polygonOffset: true,
+  polygonOffsetFactor: -4,
+  polygonOffsetUnits: -4,
+});
 
 // Pre-allocated static index buffer for 32x32 quad grid
 const GRID_RES = 32;
@@ -79,6 +120,48 @@ const SHARED_GRID_INDICES = new Uint16Array(INDEX_COUNT);
 // Scratch reusable vector for normal calculation
 const _normalScratch = new THREE.Vector3();
 
+interface ClipResult {
+  t0: number;
+  t1: number;
+}
+const _clipResult: ClipResult = { t0: 0, t1: 1 };
+
+function clipSegmentAABB(
+  x0: number, z0: number,
+  x1: number, z1: number,
+  minX: number, maxX: number,
+  minZ: number, maxZ: number,
+  outT: ClipResult
+): boolean {
+  let t0 = 0.0;
+  let t1 = 1.0;
+  const dx = x1 - x0;
+  const dz = z1 - z0;
+
+  const p = [-dx, dx, -dz, dz];
+  const q = [x0 - minX, maxX - x0, z0 - minZ, maxZ - z0];
+
+  for (let i = 0; i < 4; i++) {
+    const pi = p[i];
+    const qi = q[i];
+    if (Math.abs(pi) < 1e-9) {
+      if (qi < 0) return false;
+    } else {
+      const r = qi / pi;
+      if (pi < 0) {
+        if (r > t1) return false;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return false;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  outT.t0 = t0;
+  outT.t1 = t1;
+  return t0 <= t1;
+}
+
 /**
  * Reusable Pooled Chunk Visual Entity.
  */
@@ -95,6 +178,7 @@ export class TerrainChunk {
   private readonly posAttr: THREE.BufferAttribute;
   private readonly normAttr: THREE.BufferAttribute;
   private readonly colAttr: THREE.BufferAttribute;
+  private readonly uvAttr: THREE.BufferAttribute;
 
   constructor() {
     this.terrainGeo = new THREE.BufferGeometry();
@@ -102,14 +186,17 @@ export class TerrainChunk {
     const positions = new Float32Array(VERT_COUNT * 3);
     const normals = new Float32Array(VERT_COUNT * 3);
     const colors = new Float32Array(VERT_COUNT * 3);
+    const uvs = new Float32Array(VERT_COUNT * 2);
 
     this.posAttr = new THREE.BufferAttribute(positions, 3);
     this.normAttr = new THREE.BufferAttribute(normals, 3);
     this.colAttr = new THREE.BufferAttribute(colors, 3);
+    this.uvAttr = new THREE.BufferAttribute(uvs, 2);
 
     this.terrainGeo.setAttribute('position', this.posAttr);
     this.terrainGeo.setAttribute('normal', this.normAttr);
     this.terrainGeo.setAttribute('color', this.colAttr);
+    this.terrainGeo.setAttribute('uv', this.uvAttr);
     this.terrainGeo.setIndex(new THREE.BufferAttribute(SHARED_GRID_INDICES, 1));
 
     this.terrainMesh = new THREE.Mesh(this.terrainGeo, terrainMat);
@@ -129,6 +216,7 @@ export class TerrainChunk {
     this.cx = cx;
     this.cz = cz;
     this.isActive = true;
+    this.group.visible = true;
 
     const chunkSize = spec.chunkSize;
     const originX = cx * chunkSize;
@@ -138,13 +226,16 @@ export class TerrainChunk {
     const pos = this.posAttr.array as Float32Array;
     const norm = this.normAttr.array as Float32Array;
     const col = this.colAttr.array as Float32Array;
+    const uv = this.uvAttr.array as Float32Array;
 
-    // Grass & Dirt palette colors
-    const grassR = 0.18, grassG = 0.44, grassB = 0.24;
-    const dirtR  = 0.38, dirtG  = 0.31, dirtB  = 0.22;
+    // Grass, Dirt shoulder & Mountain Rock palette colors
+    const grassR = 0.36, grassG = 0.58, grassB = 0.26;
+    const dirtR  = 0.50, dirtG  = 0.40, dirtB  = 0.28;
+    const rockR  = 0.42, rockG  = 0.42, rockB  = 0.40;
 
     let vIdx = 0;
     let cIdx = 0;
+    let uvIdx = 0;
 
     for (let j = 0; j <= GRID_RES; j++) {
       const z = originZ + j * step;
@@ -161,6 +252,10 @@ export class TerrainChunk {
         norm[vIdx + 1] = _normalScratch.y;
         norm[vIdx + 2] = _normalScratch.z;
 
+        // Tiling texture coordinates in world space (seamless across chunks)
+        uv[uvIdx]     = x / 6.0;
+        uv[uvIdx + 1] = z / 6.0;
+
         // Surface color blending based on road proximity and slope
         const nearest = roadIndex.getNearestRoad(x, z, 24);
         let dirtWeight = 0;
@@ -171,28 +266,38 @@ export class TerrainChunk {
           }
         }
 
-        // Steeper slopes show more dirt/rock
-        if (_normalScratch.y < 0.92) {
-          dirtWeight = Math.max(dirtWeight, (0.92 - _normalScratch.y) * 4.0);
+        // Steeper slopes show granite rock
+        let rockWeight = 0;
+        if (_normalScratch.y < 0.90) {
+          rockWeight = Math.min(1.0, (0.90 - _normalScratch.y) * 5.0);
         }
 
-        dirtWeight = Math.min(1.0, dirtWeight);
-
         // Subtle per-vertex noise variation for natural meadow mottling
-        const mottle = ((i * 13 + j * 37) % 11) / 80;
+        const mottle = (((i * 19 + j * 37) % 13) - 6) / 100;
+        let baseR = Math.max(0, grassR + mottle);
+        let baseG = Math.max(0, grassG + mottle);
+        let baseB = Math.max(0, grassB + mottle);
 
-        col[cIdx]     = (1 - dirtWeight) * (grassR + mottle) + dirtWeight * dirtR;
-        col[cIdx + 1] = (1 - dirtWeight) * (grassG + mottle) + dirtWeight * dirtG;
-        col[cIdx + 2] = (1 - dirtWeight) * (grassB + mottle) + dirtWeight * dirtB;
+        if (rockWeight > 0) {
+          baseR = (1 - rockWeight) * baseR + rockWeight * rockR;
+          baseG = (1 - rockWeight) * baseG + rockWeight * rockG;
+          baseB = (1 - rockWeight) * baseB + rockWeight * rockB;
+        }
+
+        col[cIdx]     = (1 - dirtWeight) * baseR + dirtWeight * dirtR;
+        col[cIdx + 1] = (1 - dirtWeight) * baseG + dirtWeight * dirtG;
+        col[cIdx + 2] = (1 - dirtWeight) * baseB + dirtWeight * dirtB;
 
         vIdx += 3;
         cIdx += 3;
+        uvIdx += 2;
       }
     }
 
     this.posAttr.needsUpdate = true;
     this.normAttr.needsUpdate = true;
     this.colAttr.needsUpdate = true;
+    this.uvAttr.needsUpdate = true;
     this.terrainGeo.computeBoundingBox();
     this.terrainGeo.computeBoundingSphere();
 
@@ -218,10 +323,10 @@ export class TerrainChunk {
     if (edges.length === 0) return;
 
     const chunkSize = spec.chunkSize;
-    const minChunkX = cx * chunkSize - 4;
-    const maxChunkX = (cx + 1) * chunkSize + 4;
-    const minChunkZ = cz * chunkSize - 4;
-    const maxChunkZ = (cz + 1) * chunkSize + 4;
+    const minChunkX = cx * chunkSize - 2;
+    const maxChunkX = (cx + 1) * chunkSize + 2;
+    const minChunkZ = cz * chunkSize - 2;
+    const maxChunkZ = (cz + 1) * chunkSize + 2;
 
     const nodes = roadIndex.graph.nodes;
 
@@ -235,6 +340,15 @@ export class TerrainChunk {
       const len = Math.hypot(dx, dz);
       if (len < 0.5) continue;
 
+      if (!clipSegmentAABB(nA.x, nA.z, nB.x, nB.z, minChunkX, maxChunkX, minChunkZ, maxChunkZ, _clipResult)) {
+        continue;
+      }
+
+      const t0 = _clipResult.t0;
+      const t1 = _clipResult.t1;
+      const segLen = len * (t1 - t0);
+      if (segLen < 0.2) continue;
+
       const dirX = dx / len;
       const dirZ = dz / len;
       const perpX = -dirZ;
@@ -242,43 +356,44 @@ export class TerrainChunk {
 
       const halfW = edge.width * 0.5;
 
-      // Subdivide edge within chunk bounds
-      const subSteps = Math.max(2, Math.ceil(len / 16));
+      const subSteps = Math.max(2, Math.ceil(segLen / 12));
       const ribbonPositions: number[] = [];
+      const ribbonUvs: number[] = [];
       const stripePositions: number[] = [];
+      const stripeUvs: number[] = [];
 
       for (let s = 0; s <= subSteps; s++) {
-        const t = s / subSteps;
+        const stepT = s / subSteps;
+        const t = t0 + stepT * (t1 - t0);
         const cxPoint = nA.x + t * dx;
         const czPoint = nA.z + t * dz;
 
-        // Skip points strictly outside chunk expanded bbox
-        if (cxPoint < minChunkX && nB.x < minChunkX) continue;
-        if (cxPoint > maxChunkX && nB.x > maxChunkX) continue;
-        if (czPoint < minChunkZ && nB.z < minChunkZ) continue;
-        if (czPoint > maxChunkZ && nB.z > maxChunkZ) continue;
-
         const leftX = cxPoint - perpX * halfW;
         const leftZ = czPoint - perpZ * halfW;
-        const leftY = terrainHeight.groundHeightAt(leftX, leftZ) + 0.04;
+        const leftY = terrainHeight.groundHeightAt(leftX, leftZ) + 0.05;
 
         const rightX = cxPoint + perpX * halfW;
         const rightZ = czPoint + perpZ * halfW;
-        const rightY = terrainHeight.groundHeightAt(rightX, rightZ) + 0.04;
+        const rightY = terrainHeight.groundHeightAt(rightX, rightZ) + 0.05;
 
-        ribbonPositions.push(leftX, leftY, leftZ);
-        ribbonPositions.push(rightX, rightY, rightZ);
+        ribbonPositions.push(leftX, leftY, leftZ, rightX, rightY, rightZ);
+
+        const vDist = (t * len) / 8.0;
+        ribbonUvs.push(0, vDist, 1, vDist);
 
         // Center lane stripe points
-        const stripeHalfW = edge.roadClass === RoadClass.HIGHWAY ? 0.40 : 0.20;
-        const centerY = terrainHeight.groundHeightAt(cxPoint, czPoint) + 0.06;
-        stripePositions.push(cxPoint - perpX * stripeHalfW, centerY, czPoint - perpZ * stripeHalfW);
-        stripePositions.push(cxPoint + perpX * stripeHalfW, centerY, czPoint + perpZ * stripeHalfW);
+        const stripeHalfW = edge.roadClass === RoadClass.HIGHWAY ? 0.35 : 0.20;
+        const stripeY = terrainHeight.groundHeightAt(cxPoint, czPoint) + 0.07;
+        stripePositions.push(
+          cxPoint - perpX * stripeHalfW, stripeY, czPoint - perpZ * stripeHalfW,
+          cxPoint + perpX * stripeHalfW, stripeY, czPoint + perpZ * stripeHalfW
+        );
+        stripeUvs.push(0, vDist, 1, vDist);
       }
 
       if (ribbonPositions.length >= 12) {
         // Construct asphalt ribbon mesh
-        const ribbonGeo = this.createStripGeometry(ribbonPositions);
+        const ribbonGeo = this.createStripGeometry(ribbonPositions, ribbonUvs);
         const mat = edge.roadClass === RoadClass.HIGHWAY
           ? asphaltHighwayMat
           : edge.roadClass === RoadClass.AVENUE
@@ -290,7 +405,7 @@ export class TerrainChunk {
         this.roadGroup.add(roadMesh);
 
         // Construct center line stripe
-        const stripeGeo = this.createStripGeometry(stripePositions);
+        const stripeGeo = this.createStripGeometry(stripePositions, stripeUvs);
         const stripeMat = edge.roadClass === RoadClass.HIGHWAY ? yellowStripeMat : whiteStripeMat;
         const stripeMesh = new THREE.Mesh(stripeGeo, stripeMat);
         this.roadGroup.add(stripeMesh);
@@ -298,10 +413,13 @@ export class TerrainChunk {
     }
   }
 
-  private createStripGeometry(positions: number[]): THREE.BufferGeometry {
+  private createStripGeometry(positions: number[], uvs?: number[]): THREE.BufferGeometry {
     const geo = new THREE.BufferGeometry();
     const posArr = new Float32Array(positions);
     geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    if (uvs && uvs.length > 0) {
+      geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+    }
 
     const pairCount = positions.length / 6;
     const indices = new Uint16Array((pairCount - 1) * 6);
@@ -313,12 +431,13 @@ export class TerrainChunk {
       const v2 = (p + 1) * 2;
       const v3 = (p + 1) * 2 + 1;
 
+      // CCW from above: (v0, v1, v2) and (v2, v1, v3)
       indices[iIdx++] = v0;
-      indices[iIdx++] = v2;
       indices[iIdx++] = v1;
+      indices[iIdx++] = v2;
 
-      indices[iIdx++] = v1;
       indices[iIdx++] = v2;
+      indices[iIdx++] = v1;
       indices[iIdx++] = v3;
     }
 
