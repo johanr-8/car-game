@@ -243,8 +243,8 @@ export class CarModel {
    * Update visual wheel steer angle & reactive brake light glow.
    */
   updateVisuals(steerAngle: number, isBraking: boolean): void {
-    this.frontLeftWheel.rotation.y = steerAngle * 0.45;
-    this.frontRightWheel.rotation.y = steerAngle * 0.45;
+    this.frontLeftWheel.rotation.y = -steerAngle * 0.45;
+    this.frontRightWheel.rotation.y = -steerAngle * 0.45;
 
     if (isBraking) {
       this.brakeLightMat.color.setHex(0xff1111);

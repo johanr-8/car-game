@@ -142,7 +142,13 @@ export class VehicleSystem {
   /**
    * Visual interpolation and camera update.
    */
-  updateVisuals(alpha: number, dt: number, isBraking: boolean, isRacing: boolean): void {
+  updateVisuals(
+    alpha: number,
+    dt: number,
+    isBraking: boolean,
+    isRacing: boolean,
+    skipCameraFollow = false
+  ): void {
     // 1. Visual transform interpolation
     for (let i = 0; i < this.vehicles.length; i++) {
       this.vehicles[i].updateVisuals(alpha, isBraking);
@@ -165,11 +171,13 @@ export class VehicleSystem {
     }
 
     // 3. 6DOF chase camera follow
-    this.chaseCamera.update(
-      this.playerVehicle.controller.position,
-      this.playerVehicle.controller.quaternion,
-      this.playerVehicle.controller.speedNorm,
-      dt
-    );
+    if (!skipCameraFollow) {
+      this.chaseCamera.update(
+        this.playerVehicle.controller.position,
+        this.playerVehicle.controller.quaternion,
+        this.playerVehicle.controller.speedNorm,
+        dt
+      );
+    }
   }
 }

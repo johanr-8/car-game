@@ -150,6 +150,17 @@ export class ControlsModal {
       </td>
     `;
     this.tableBody.appendChild(trPause);
+
+    // Add Spectator Fly Mode static row
+    const trFly = document.createElement('tr');
+    trFly.style.cssText = 'border-bottom:1px solid rgba(255,255,255,0.05);';
+    trFly.innerHTML = `
+      <td style="padding:9px 6px;color:#e2e8f0;font-weight:600;">Spectator Fly Mode</td>
+      <td style="padding:9px 6px;text-align:right;">
+        <span style="background:#1e293b;border:1px solid rgba(56,189,248,0.4);color:#38bdf8;padding:3px 8px;border-radius:4px;font-family:monospace;font-weight:800;font-size:12px;">F</span>
+      </td>
+    `;
+    this.tableBody.appendChild(trFly);
   }
 
   show(): void {

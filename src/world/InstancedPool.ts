@@ -121,61 +121,18 @@ export class InstancedPool {
 // ── Shared Unit Geometries ───────────────────────────────────
 
 function createUnitHouseGeometry(): THREE.BufferGeometry {
-  // Unit box base (walls) from y = 0 to 0.65, hipped roof prism from 0.65 to 1.0
-  const geo = new THREE.BufferGeometry();
+  // Lower walls: unit box 1.0 x 0.65 x 1.0, centered at y = -0.175 (bounds [-0.5, 0.15])
+  const walls = new THREE.BoxGeometry(1.0, 0.65, 1.0);
+  walls.translate(0, -0.175, 0);
 
-  const hw = 0.5, hd = 0.5;
-  const wallH = 0.65;
-  const roofPeakH = 1.0;
+  // Upper hipped roof: 4-sided pyramid, base rotated 45 deg to align with walls.
+  // Radius to corner = 0.5 * sqrt(2) ≈ 0.7071. We use 0.74 for a crisp eave overhang.
+  // Height = 0.35, centered at y = 0.325 (bounds [0.15, 0.50])
+  const roof = new THREE.ConeGeometry(0.74, 0.35, 4);
+  roof.rotateY(Math.PI / 4);
+  roof.translate(0, 0.325, 0);
 
-  // 14 vertices: 8 for box + 2 for roof ridge
-  const positions: number[] = [
-    // Bottom 4 (0..3)
-    -hw, 0, -hd,
-     hw, 0, -hd,
-     hw, 0,  hd,
-    -hw, 0,  hd,
-    // Wall top 4 (4..7)
-    -hw, wallH, -hd,
-     hw, wallH, -hd,
-     hw, wallH,  hd,
-    -hw, wallH,  hd,
-    // Roof ridge line 2 (8..9)
-    -hw * 0.4, roofPeakH, 0,
-     hw * 0.4, roofPeakH, 0,
-  ];
-
-  const indices: number[] = [
-    // South wall
-    7, 6, 2,  7, 2, 3,
-    // North wall
-    4, 1, 5,  4, 0, 1,
-    // East wall
-    5, 2, 6,  5, 1, 2,
-    // West wall
-    6, 0, 4,  6, 3, 0,
-    // Roof South slope
-    7, 9, 8,  7, 6, 9,
-    // Roof North slope
-    4, 8, 9,  4, 9, 5,
-    // Roof West gable
-    4, 7, 8,
-    // Roof East gable
-    6, 5, 9,
-  ];
-
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-
-  // Basic planar UVs
-  const uvs: number[] = [];
-  for (let i = 0; i < positions.length; i += 3) {
-    uvs.push(positions[i] + 0.5, positions[i + 1]);
-  }
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-
-  return geo;
+  return mergeBufferGeometries([walls, roof]);
 }
 
 function createTreeGeometry(): THREE.BufferGeometry {
@@ -213,14 +170,17 @@ function createStreetLampGeometry(): THREE.BufferGeometry {
 function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
   let totalVerts = 0;
   let totalIndices = 0;
+  let hasUV = false;
 
   for (const g of geos) {
     totalVerts += g.getAttribute('position').count;
     if (g.index) totalIndices += g.index.count;
+    if (g.getAttribute('uv')) hasUV = true;
   }
 
   const mergedPos = new Float32Array(totalVerts * 3);
   const mergedNorm = new Float32Array(totalVerts * 3);
+  const mergedUv = hasUV ? new Float32Array(totalVerts * 2) : null;
   const mergedIndices = new Uint16Array(totalIndices);
 
   let vOffset = 0;
@@ -230,9 +190,14 @@ function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeomet
   for (const g of geos) {
     const pos = g.getAttribute('position');
     const norm = g.getAttribute('normal');
+    const uv = g.getAttribute('uv');
+
     mergedPos.set(pos.array as Float32Array, vOffset * 3);
     if (norm) {
       mergedNorm.set(norm.array as Float32Array, vOffset * 3);
+    }
+    if (mergedUv && uv) {
+      mergedUv.set(uv.array as Float32Array, vOffset * 2);
     }
 
     if (g.index) {
@@ -251,6 +216,9 @@ function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeomet
   const merged = new THREE.BufferGeometry();
   merged.setAttribute('position', new THREE.BufferAttribute(mergedPos, 3));
   merged.setAttribute('normal', new THREE.BufferAttribute(mergedNorm, 3));
+  if (mergedUv) {
+    merged.setAttribute('uv', new THREE.BufferAttribute(mergedUv, 2));
+  }
   if (totalIndices > 0) {
     merged.setIndex(new THREE.BufferAttribute(mergedIndices, 1));
   }

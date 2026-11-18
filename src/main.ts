@@ -20,7 +20,8 @@ import * as THREE from 'three';
 import { FIXED_DT, MAX_ACCUMULATOR } from './core/constants';
 import { createRenderer } from './core/Renderer';
 import { createComposer } from './core/PostProcessing';
-import { readInput } from './core/InputManager';
+import { readInput, isInputSuppressed, type InputState } from './core/InputManager';
+import { FlyController } from './core/FlyController';
 import { VehicleSystem, HudSystem, RaceSystem, GameState, GameMode } from './systems';
 import { isDevMode } from './core/DevMode';
 import { SeededRandom } from './core/SeededRandom';
@@ -35,6 +36,21 @@ const scene = new THREE.Scene();
 // ── Subsystems ───────────────────────────────────────────────
 const vehicleSystem = new VehicleSystem(scene, container.clientWidth / container.clientHeight);
 const hudSystem = new HudSystem();
+const flyController = new FlyController();
+
+// Fly-Mode Keyboard Toggle (Shortcut: F)
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyF' && !isInputSuppressed()) {
+    if (raceSystem.gameState === GameState.ROAMING || raceSystem.gameState === GameState.RACING) {
+      const active = flyController.toggle(vehicleSystem.chaseCamera.camera);
+      hudSystem.raceHUD.setFlyMode(active);
+      if (!active) {
+        const player = vehicleSystem.playerVehicle;
+        vehicleSystem.chaseCamera.reset(player.controller.position, player.controller.quaternion);
+      }
+    }
+  }
+});
 
 // Post-Processing pipeline
 const composer = createComposer(renderer, scene, vehicleSystem.chaseCamera.camera);
@@ -194,6 +210,17 @@ window.addEventListener('resize', () => {
 let accumulator = 0;
 let lastTime = performance.now();
 
+const _flyNeutralInput: InputState = {
+  steer: 0,
+  throttle: 0,
+  brake: 1,
+  drift: false,
+  boost: false,
+  restart: false,
+  remix: false,
+  debug: false,
+};
+
 function loop(): void {
   requestAnimationFrame(loop);
 
@@ -203,6 +230,12 @@ function loop(): void {
 
   const dt = Math.min(dtMs / 1000, MAX_ACCUMULATOR);
   accumulator += dt;
+
+  // Auto-disable fly mode when paused or returning to menu
+  if (flyController.isEnabled && (raceSystem.gameState === GameState.MENU || raceSystem.gameState === GameState.PAUSED)) {
+    flyController.disable();
+    hudSystem.raceHUD.setFlyMode(false);
+  }
 
   const input = readInput();
 
@@ -225,8 +258,11 @@ function loop(): void {
   while (accumulator >= FIXED_DT - 1e-8) {
     const player = vehicleSystem.playerVehicle;
 
+    // Neutralize player car input while flying so vehicle remains parked
+    const carInput = flyController.isEnabled ? _flyNeutralInput : input;
+
     // 1. Mode-specific physics progression (Race or Roam)
-    raceSystem.updatePhysics(FIXED_DT, input);
+    raceSystem.updatePhysics(FIXED_DT, carInput);
 
     // 2. World & Inversion update (Race mode only)
     if (raceSystem.gameMode === GameMode.RACE && raceSystem.worldSystem) {
@@ -245,28 +281,37 @@ function loop(): void {
   const alpha = accumulator / FIXED_DT;
   const player = vehicleSystem.playerVehicle;
 
-  // 1. Vehicle visual interpolation, ghost replay, and camera follow
+  // 1. Update fly camera orientation & translation if active
+  if (flyController.isEnabled) {
+    flyController.update(dt);
+  }
+
+  // 2. Vehicle visual interpolation, ghost replay, and camera follow
   vehicleSystem.updateVisuals(
     alpha,
     dt,
     input.brake > 0,
-    raceSystem.gameState === GameState.RACING
+    raceSystem.gameState === GameState.RACING,
+    flyController.isEnabled
   );
 
-  // 2. Chunk streaming LOD around player (Race mode or Free Roam)
+  // 3. Chunk streaming LOD around spectator camera or player car
+  const streamX = flyController.isEnabled ? flyController.position.x : player.controller.position.x;
+  const streamZ = flyController.isEnabled ? flyController.position.z : player.controller.position.z;
+
   if (raceSystem.gameMode === GameMode.RACE && raceSystem.worldSystem) {
-    raceSystem.worldSystem.updateVisuals(player.controller.position.x, player.controller.position.z);
+    raceSystem.worldSystem.updateVisuals(streamX, streamZ);
   } else if (raceSystem.gameMode === GameMode.ROAM && raceSystem.roamWorld) {
-    raceSystem.roamWorld.updateVisuals(player.controller.position.x, player.controller.position.z);
+    raceSystem.roamWorld.updateVisuals(streamX, streamZ);
     hudSystem.stats.loadedChunks = raceSystem.roamWorld.loadedChunksCount;
     hudSystem.stats.chunkBuildMs = raceSystem.roamWorld.chunkBuildMs;
   }
 
-  // 3. Render scene
+  // 4. Render scene
   renderer.info.reset();
   composer.render();
 
-  // 4. Update HUD, profiler, and debug overlay
+  // 5. Update HUD, profiler, and debug overlay
   hudSystem.update(
     raceSystem.gameState,
     raceSystem.countdownTimer,

@@ -302,11 +302,19 @@ export class CityPropsGenerator {
       const perpX = -dirZ;
       const perpZ = dirX;
 
-      const lampDist = edge.width * 0.5 + 1.2; // Sidewalk edge
+      const lampDist = edge.width * 0.5 + 2.2; // Sidewalk / verge clearance
       const steps = Math.floor(len / spacing);
 
       for (let s = 1; s <= steps; s++) {
         const t = (s * spacing) / len;
+        const distFromA = t * len;
+        const distFromB = len - distFromA;
+
+        // Skip positions near intersection junctions (prevent spawning inside crossing roadways)
+        if (distFromA < 18 || distFromB < 18) {
+          continue;
+        }
+
         const cxPoint = nA.x + t * dx;
         const czPoint = nA.z + t * dz;
 
@@ -315,13 +323,20 @@ export class CityPropsGenerator {
           continue;
         }
 
-        // Place lamp on right-hand side of roadway facing inward
+        // Place lamp on right-hand side of roadway
         const lampX = cxPoint + perpX * lampDist;
         const lampZ = czPoint + perpZ * lampDist;
+
+        // Strict clearance check: ensure lamp is never inside any road or crossing intersection
+        const nearest = this.roadIndex.getNearestRoad(lampX, lampZ, 48);
+        if (nearest && nearest.distance < nearest.roadHalfWidth + 1.8) {
+          continue; // REJECT: inside or too close to asphalt
+        }
+
         const lampY = this.terrainHeight.groundHeightAt(lampX, lampZ);
 
-        // Rotate to point lamp head towards road center
-        const rotY = Math.atan2(-perpX, -perpZ);
+        // Rotate so lamp arm (+X in local geometry) points inward towards roadway center (-perpX, -perpZ)
+        const rotY = Math.atan2(perpZ, -perpX);
 
         const mat = new THREE.Matrix4();
         const pos = new THREE.Vector3(lampX, lampY, lampZ);

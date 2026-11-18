@@ -58,6 +58,7 @@ export class RaceHUD {
 
   private readonly elBanner:      HTMLDivElement;
   private bannerTimer = 0;
+  private readonly elFlyModeBadge: HTMLDivElement;
 
   // ── Dirty-Checking State Caches (Zero DOM layout thrashing) ─
   private lastLapCentis = -1;
@@ -367,6 +368,33 @@ export class RaceHUD {
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.elBanner);
 
+    // ── 8b. Fly Mode Spectator Badge ─────────────────────────
+    this.elFlyModeBadge = document.createElement('div');
+    Object.assign(this.elFlyModeBadge.style, {
+      position:       'fixed',
+      top:            '20px',
+      left:           '50%',
+      transform:      'translateX(-50%)',
+      padding:        '10px 24px',
+      background:     'rgba(15, 23, 42, 0.90)',
+      border:         '1px solid rgba(56, 189, 248, 0.6)',
+      borderRadius:   '24px',
+      fontSize:       '13px',
+      fontWeight:     '600',
+      color:          '#f8fafc',
+      letterSpacing:  '0.5px',
+      display:        'none',
+      boxShadow:      '0 8px 32px rgba(0,0,0,0.5)',
+      backdropFilter: 'blur(8px)',
+      pointerEvents:  'none',
+      zIndex:         '9999',
+    } as Partial<CSSStyleDeclaration>);
+    this.elFlyModeBadge.innerHTML = `
+      <span style="color:#38bdf8;font-weight:800;margin-right:12px;">✈ FLY MODE (SPECTATOR)</span>
+      <span style="color:#cbd5e1;">WASD Move • Shift Turbo • Space/C Up/Down • Mouse/Arrows Look • <kbd style="background:#1e293b;color:#38bdf8;padding:2px 6px;border-radius:3px;border:1px solid #38bdf8;">F</kbd> Exit</span>
+    `;
+    this.root.appendChild(this.elFlyModeBadge);
+
     // ── 9. Interactive Mission Briefing Modal ────────────────
     this.elBriefingModal = document.createElement('div');
     Object.assign(this.elBriefingModal.style, {
@@ -431,6 +459,7 @@ export class RaceHUD {
           <div><kbd style="background:#334155;color:#fff;padding:2px 6px;border-radius:3px;">SHIFT</kbd> Nitro Boost</div>
           <div><kbd style="background:#334155;color:#fff;padding:2px 6px;border-radius:3px;">R</kbd> Restart Run</div>
           <div><kbd style="background:#334155;color:#fff;padding:2px 6px;border-radius:3px;">M</kbd> City Remix (Seed/Time)</div>
+          <div><kbd style="background:#334155;color:#fff;padding:2px 6px;border-radius:3px;">F</kbd> Spectator Fly Mode</div>
         </div>
       </div>
 
@@ -588,6 +617,10 @@ export class RaceHUD {
       this.elCountdown.style.display = 'none';
       this.elBanner.style.display = 'none';
     }
+  }
+
+  setFlyMode(active: boolean): void {
+    this.elFlyModeBadge.style.display = active ? 'block' : 'none';
   }
 
   setSeedBadge(seed: number, themeName: string, isDaily: boolean): void {
