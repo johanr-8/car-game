@@ -12,3 +12,7 @@ export { TrackSpline }       from './TrackSpline';
 export type { Checkpoint }   from './TrackSpline';
 export { TrackQuery, type TrackQueryResult } from './TrackQuery';
 export { RoamWorld, ROAM_SPAWN_POS, ROAM_SPAWN_QUAT } from './RoamWorld';
+export * from './WorldConfig';
+export * from './RoadNetwork';
+export * from './TerrainHeight';
+export * from './ChunkManager';

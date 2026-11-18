@@ -39,6 +39,9 @@ export class DebugOverlay {
   private readonly elTicks:  HTMLSpanElement;
   private readonly elHeap:   HTMLSpanElement;
   private readonly elGrav:   HTMLSpanElement;
+  private readonly elChunks: HTMLSpanElement;
+  private readonly elBuild:  HTMLSpanElement;
+  private readonly elSurf:   HTMLSpanElement;
 
   // ── Profiling Metrics Buffer (Zero GC per frame) ────────────
   private readonly windowSamples = new Float32Array(2400); // Up to 2400 frames per 10s (~240 Hz headroom)
@@ -104,6 +107,9 @@ export class DebugOverlay {
     this.elTicks  = makeRow('Phys Ticks :');
     this.elHeap   = makeRow('JS Heap    :');
     this.elGrav   = makeRow('Surface N  :');
+    this.elSurf   = makeRow('Surface    :');
+    this.elChunks = makeRow('Chunks     :');
+    this.elBuild  = makeRow('Build ms   :');
 
     const hint = document.createElement('div');
     hint.textContent = '[F3] toggle | auto-profile: 10s log';
@@ -225,6 +231,9 @@ export class DebugOverlay {
     const mem = (performance as any).memory;
     this.elHeap.textContent   = mem ? `${(mem.usedJSHeapSize / (1024 * 1024)).toFixed(1)} MB` : 'N/A';
     this.elGrav.textContent   = stats.gravityLabel;
+    this.elSurf.textContent   = stats.surfaceLabel;
+    this.elChunks.textContent = String(stats.loadedChunks);
+    this.elBuild.textContent  = stats.chunkBuildMs > 0 ? `${stats.chunkBuildMs.toFixed(2)} ms` : 'idle';
   }
 
   /**

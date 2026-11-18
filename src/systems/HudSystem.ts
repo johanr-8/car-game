@@ -25,6 +25,7 @@ import { ResultsModal } from '../ui/ResultsModal';
 import { LoadingScreen } from '../ui/LoadingScreen';
 import { StatsCollector } from '../core/StatsCollector';
 import { isDevMode } from '../core/DevMode';
+import { SURFACE_CONFIG } from '../world/WorldConfig';
 import type { VehicleEntity } from '../car/VehicleEntity';
 import type { WorldSystem } from './WorldSystem';
 import { GameState } from './GameState';
@@ -77,6 +78,9 @@ export class HudSystem {
       const n = playerVehicle.controller.surfaceNormal;
       const status = playerVehicle.controller.isGrounded ? 'GROUND' : 'AIR';
       this.stats.gravityLabel = `[${status}] N:(${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}) | ${(playerVehicle.controller.speed * 3.6).toFixed(0)} km/h`;
+      const surfType = playerVehicle.controller.currentSurfaceType;
+      const tuning = SURFACE_CONFIG[surfType];
+      this.stats.surfaceLabel = tuning ? tuning.label : surfType;
     }
 
     // 2. Debug Overlay update

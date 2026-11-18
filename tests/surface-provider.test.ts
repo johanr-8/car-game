@@ -163,7 +163,7 @@ describe('SurfaceProvider Interface & Mock Implementation', () => {
     expect(car.position.y).toBeLessThan(15.0);
   });
 
-  it('RoamWorld implements SurfaceProvider and detects flat ground and obstacles via BVH', () => {
+  it('RoamWorld implements SurfaceProvider and detects ground height and normal analytically', () => {
     const roamWorld = new RoamWorld();
     const hit: SurfaceHit = {
       hit: false,
@@ -172,26 +172,23 @@ describe('SurfaceProvider Interface & Mock Implementation', () => {
       normal: new THREE.Vector3(),
     };
 
-    // 1. Raycast down onto flat ground from y = 10
-    const originGround = new THREE.Vector3(50, 10, 50);
+    // 1. Raycast down onto terrain from y = 20
+    const originGround = new THREE.Vector3(50, 20, 50);
     const dirDown = new THREE.Vector3(0, -1, 0);
     const hitGround = roamWorld.raycast(originGround, dirDown, 30, hit);
 
     expect(hitGround).toBe(true);
     expect(hit.hit).toBe(true);
-    expect(hit.normal.y).toBeCloseTo(1.0, 2);
-    expect(hit.point.y).toBeCloseTo(0.0, 2);
+    expect(hit.normal.y).toBeGreaterThan(0.85);
+    const expectedHeight = roamWorld.groundHeightAt(50, 50);
+    expect(hit.point.y).toBeCloseTo(expectedHeight, 2);
 
-    // 2. Raycast horizontally into container at (18, 1.5, 40)
-    // Container size is 3.5m wide (X: 16.25 to 19.75), 8m long (Z: 36 to 44)
-    const originObstacle = new THREE.Vector3(10, 1.5, 40);
-    const dirTowards = new THREE.Vector3(1, 0, 0);
-    const hitObstacle = roamWorld.raycast(originObstacle, dirTowards, 20, hit);
-
-    expect(hitObstacle).toBe(true);
-    expect(hit.hit).toBe(true);
-    // Hit face on container side facing -X direction: normal is (-1, 0, 0)
-    expect(hit.normal.x).toBeCloseTo(-1.0, 2);
-    expect(hit.point.x).toBeCloseTo(16.25, 1);
+    // 2. Direct groundHeightAt and groundNormalAt queries
+    const gh = roamWorld.groundHeightAt(0, 0);
+    expect(gh).toBeGreaterThan(0);
+    const norm = new THREE.Vector3();
+    roamWorld.groundNormalAt(0, 0, norm);
+    expect(norm.length()).toBeCloseTo(1.0, 4);
+    expect(norm.y).toBeGreaterThan(0.8);
   });
 });

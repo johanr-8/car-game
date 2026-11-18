@@ -8,6 +8,7 @@
  * ─────────────────────────────────────────────────────────────
  */
 import type * as THREE from 'three';
+import type { SurfaceType } from './WorldConfig';
 
 export interface SurfaceHit {
   hit: boolean;
@@ -32,4 +33,15 @@ export interface SurfaceProvider {
    * Optional analytical ground height query at (x, z).
    */
   groundHeightAt?(x: number, z: number): number;
+
+  /**
+   * Optional analytical ground surface normal query at (x, z).
+   * Populates outNormal in-place to avoid heap allocations.
+   */
+  groundNormalAt?(x: number, z: number, outNormal: THREE.Vector3): void;
+
+  /**
+   * Returns surface type (ASPHALT, GRASS, DIRT) at given world coordinate.
+   */
+  getSurfaceTypeAt?(x: number, z: number): SurfaceType;
 }

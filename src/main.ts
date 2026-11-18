@@ -253,9 +253,13 @@ function loop(): void {
     raceSystem.gameState === GameState.RACING
   );
 
-  // 2. Chunk streaming LOD around player (Race mode only)
+  // 2. Chunk streaming LOD around player (Race mode or Free Roam)
   if (raceSystem.gameMode === GameMode.RACE && raceSystem.worldSystem) {
     raceSystem.worldSystem.updateVisuals(player.controller.position.x, player.controller.position.z);
+  } else if (raceSystem.gameMode === GameMode.ROAM && raceSystem.roamWorld) {
+    raceSystem.roamWorld.updateVisuals(player.controller.position.x, player.controller.position.z);
+    hudSystem.stats.loadedChunks = raceSystem.roamWorld.loadedChunksCount;
+    hudSystem.stats.chunkBuildMs = raceSystem.roamWorld.chunkBuildMs;
   }
 
   // 3. Render scene

@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { CarConfig as C } from './CarConfig';
 import type { InputState } from '../core/InputManager';
 import type { SurfaceProvider, SurfaceHit } from '../world/SurfaceProvider';
+import { SurfaceType, SURFACE_CONFIG } from '../world/WorldConfig';
 
 // Pre-allocated scratch objects (Zero per-frame allocations)
 const _fwd          = new THREE.Vector3();
@@ -85,6 +86,7 @@ export class ArcadeCarController {
   boostActive = false;
   boostForce = 0;
   hasBarrierContact = false;
+  currentSurfaceType: SurfaceType = SurfaceType.ASPHALT;
 
   // ── Interpolation State (for α-rendering) ───────────────────
   readonly prevPosition = new THREE.Vector3(0, 0.94, 25);
@@ -142,6 +144,11 @@ export class ArcadeCarController {
     const hit = collision.raycast(_probePos, _probeDir, probeDist, _hitDown);
 
     if (hit) {
+      if (collision.getSurfaceTypeAt) {
+        this.currentSurfaceType = collision.getSurfaceTypeAt(this.position.x, this.position.z);
+      } else {
+        this.currentSurfaceType = SurfaceType.ASPHALT;
+      }
       // Reject side walls (only snap to surfaces facing along current car up, dot > 0.35)
       const upDot = _hitDown.normal.dot(this.surfaceNormal);
       if (upDot > 0.35) {
@@ -181,7 +188,9 @@ export class ArcadeCarController {
    * Snappy arcade throttle, braking, and local-axis steering.
    */
   private handleArcadeDynamics(dt: number, input: InputState): void {
-    const effectiveMaxSpeed = this.boostActive ? C.maxSpeed * 1.5 : C.maxSpeed;
+    const surfaceTuning = SURFACE_CONFIG[this.currentSurfaceType] || SURFACE_CONFIG[SurfaceType.ASPHALT];
+    const baseMaxSpeed = this.boostActive ? C.maxSpeed * 1.5 : C.maxSpeed;
+    const effectiveMaxSpeed = baseMaxSpeed * surfaceTuning.topSpeedMultiplier;
 
     if (this.isGrounded) {
       // ── Throttle, Braking & Reversing with 0.12s Dead-Stop Transition ──
@@ -192,12 +201,15 @@ export class ArcadeCarController {
           this.speed += C.brakeForce * dt;
           if (this.speed > 0) this.speed = 0;
         } else if (this.speed < effectiveMaxSpeed) {
-          // Progressive supercar torque curve
+          // Progressive supercar torque curve modulated by surface grip
           const speedRatio = Math.min(Math.abs(this.speed) / effectiveMaxSpeed, 1.0);
           const torqueCurve = Math.max(0.35, 1.0 - speedRatio * 0.65);
-          const accel = (C.acceleration * torqueCurve) + (this.boostActive ? this.boostForce : 0);
+          const accel = ((C.acceleration * torqueCurve) + (this.boostActive ? this.boostForce : 0)) * surfaceTuning.gripMultiplier;
           this.speed += accel * dt;
           if (this.speed > effectiveMaxSpeed) this.speed = effectiveMaxSpeed;
+        } else if (this.speed > effectiveMaxSpeed) {
+          // Off-road / reduced surface top speed clamp
+          this.speed = Math.max(effectiveMaxSpeed, this.speed - C.brakeForce * 0.4 * dt);
         }
       } else if (input.brake > 0) {
         if (this.speed > 0) {
@@ -295,12 +307,13 @@ export class ArcadeCarController {
       }
       _fwdTan.crossVectors(this.surfaceNormal, _rightTan).normalize();
 
-      // Effective lateral friction blended exponentially over drift transition
-      const lateralFriction = THREE.MathUtils.lerp(
+      // Effective lateral friction blended exponentially over drift transition and surface
+      const baseLatFriction = THREE.MathUtils.lerp(
         C.lateralFrictionNormal,
         C.lateralFrictionDrift,
         this.driftTransition
       );
+      const lateralFriction = baseLatFriction * surfaceTuning.lateralFrictionMultiplier;
 
       // Time-based exponential decay: lateralVel *= Math.exp(-lateralFriction * dt)
       const prevLatSpeed = this.velocity.dot(_rightTan);

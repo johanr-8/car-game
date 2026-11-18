@@ -15,6 +15,11 @@ export class StatsCollector {
   /** Gravity direction as a formatted string — set externally. */
   gravityLabel = '(0, -1, 0)';
 
+  /** Free roam chunk streaming metrics. */
+  loadedChunks = 0;
+  chunkBuildMs = 0;
+  surfaceLabel = 'ASPHALT (100% GRIP)';
+
   constructor() {
     this.frameTimes = new Float32Array(this.WINDOW);
   }
