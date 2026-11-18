@@ -267,7 +267,7 @@ export class RoamWorld implements SurfaceProvider {
         }
       }
     } else {
-      // General path: check if forward ray penetrates the terrain surface
+      // General path: check if forward/lateral obstacle probe hits a steep cliff face
       const endX = origin.x + direction.x * maxDistance;
       const endY = origin.y + direction.y * maxDistance;
       const endZ = origin.z + direction.z * maxDistance;
@@ -288,9 +288,16 @@ export class RoamWorld implements SurfaceProvider {
             tLo = tMid;
           }
         }
-        hitGround = true;
-        groundDist = tHi;
-        groundPointY = origin.y + direction.y * tHi;
+        const hitX = origin.x + direction.x * tHi;
+        const hitZ = origin.z + direction.z * tHi;
+        this.terrainHeight.groundNormalAt(hitX, hitZ, _scratchSolidNormal);
+        // Only treat ground as an obstacle if it is a steep cliff / wall (normal.y < 0.60, slope > 53°)
+        // Normal rolling hills and meadows are drivable terrain, NOT solid wall barriers!
+        if (_scratchSolidNormal.y < 0.60) {
+          hitGround = true;
+          groundDist = tHi;
+          groundPointY = origin.y + direction.y * tHi;
+        }
       }
     }
 

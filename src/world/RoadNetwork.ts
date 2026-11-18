@@ -532,7 +532,9 @@ export function routeAStarBetween(
 function sampleSplinePoints(
   rawPoints: Array<{ x: number; z: number }>,
   roadClass: RoadClass,
-  landforms: Landforms
+  landforms: Landforms,
+  startElev?: number,
+  endElev?: number
 ): RoadPoint[] {
   if (rawPoints.length < 2) return [];
 
@@ -578,31 +580,59 @@ function sampleSplinePoints(
   }
   polyPoints.push(smoothed[smoothed.length - 1]);
 
-  // 3. Compute raw elevations
+  // 3. Compute raw elevations anchored strictly to startElev and endElev if provided
   const n = polyPoints.length;
   const elevs = new Float64Array(n);
+  const rawY0 = startElev !== undefined ? startElev : landforms.getHeight(polyPoints[0].x, polyPoints[0].z);
+  let rawY1 = endElev !== undefined ? endElev : landforms.getHeight(polyPoints[n - 1].x, polyPoints[n - 1].z);
+
+  const cumDist = new Float64Array(n);
+  for (let i = 0; i < n - 1; i++) {
+    cumDist[i + 1] = cumDist[i] + Math.hypot(polyPoints[i + 1].x - polyPoints[i].x, polyPoints[i + 1].z - polyPoints[i].z);
+  }
+  const totalLen = Math.max(1e-4, cumDist[n - 1]);
+
+  // Clamp end elevation if total length is physically too short for maxGrade
+  const maxFeasibleRise = maxGrade * totalLen;
+  if (rawY1 > rawY0 + maxFeasibleRise) {
+    rawY1 = rawY0 + maxFeasibleRise;
+  } else if (rawY1 < rawY0 - maxFeasibleRise) {
+    rawY1 = rawY0 - maxFeasibleRise;
+  }
+
+  const y0 = rawY0;
+  const y1 = rawY1;
+
   for (let i = 0; i < n; i++) {
     elevs[i] = landforms.getHeight(polyPoints[i].x, polyPoints[i].z);
   }
+  elevs[0] = y0;
+  elevs[n - 1] = y1;
 
-  // 4. Forward & Backward cut-and-fill smoothing to strictly guarantee grade <= maxGrade
-  for (let i = 0; i < n - 1; i++) {
-    const ds = Math.hypot(polyPoints[i + 1].x - polyPoints[i].x, polyPoints[i + 1].z - polyPoints[i].z);
-    const maxDelta = maxGrade * ds;
-    if (elevs[i + 1] > elevs[i] + maxDelta) {
-      elevs[i + 1] = elevs[i] + maxDelta;
-    } else if (elevs[i + 1] < elevs[i] - maxDelta) {
-      elevs[i + 1] = elevs[i] - maxDelta;
+  // 4. Multi-pass forward & backward cut-and-fill smoothing to strictly guarantee grade <= maxGrade
+  for (let pass = 0; pass < 2; pass++) {
+    // Forward from start
+    for (let i = 0; i < n - 1; i++) {
+      const ds = Math.max(0.01, cumDist[i + 1] - cumDist[i]);
+      const maxDelta = maxGrade * ds;
+      if (elevs[i + 1] > elevs[i] + maxDelta) {
+        elevs[i + 1] = elevs[i] + maxDelta;
+      } else if (elevs[i + 1] < elevs[i] - maxDelta) {
+        elevs[i + 1] = elevs[i] - maxDelta;
+      }
     }
-  }
-  for (let i = n - 1; i > 0; i--) {
-    const ds = Math.hypot(polyPoints[i].x - polyPoints[i - 1].x, polyPoints[i].z - polyPoints[i - 1].z);
-    const maxDelta = maxGrade * ds;
-    if (elevs[i - 1] > elevs[i] + maxDelta) {
-      elevs[i - 1] = elevs[i] + maxDelta;
-    } else if (elevs[i - 1] < elevs[i] - maxDelta) {
-      elevs[i - 1] = elevs[i] - maxDelta;
+    // Backward from destination
+    elevs[n - 1] = y1;
+    for (let i = n - 1; i > 0; i--) {
+      const ds = Math.max(0.01, cumDist[i] - cumDist[i - 1]);
+      const maxDelta = maxGrade * ds;
+      if (elevs[i - 1] > elevs[i] + maxDelta) {
+        elevs[i - 1] = elevs[i] + maxDelta;
+      } else if (elevs[i - 1] < elevs[i] - maxDelta) {
+        elevs[i - 1] = elevs[i] - maxDelta;
+      }
     }
+    elevs[0] = y0;
   }
 
   // 5. Build RoadPoint objects with longitudinal grade & curve banking
@@ -703,7 +733,7 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
         { x: (nA.x + nB.x) * 0.5, z: (nA.z + nB.z) * 0.5 },
         { x: nB.x, z: nB.z },
       ];
-      polyPoints = sampleSplinePoints(raw, roadClass, lf);
+      polyPoints = sampleSplinePoints(raw, roadClass, lf, nA.elevation, nB.elevation);
     }
 
     let hasBridge = false;
@@ -911,7 +941,7 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   // Lakeside (Town 5, Southeast Lake Valley)
   const lake = towns[5];
   const lakeCenter = townCenterIds[5];
-  const lakeR = lake.radius * 0.70;
+  const lakeR = 42.0 * scale;
   const lakeNode0 = getOrCreateNode(lake.x - lakeR, lake.z, true); // West, faces Farm
   const lakeNode1 = getOrCreateNode(lake.x, lake.z + lakeR, true); // North, faces Downtown / Pass
   const lakeNode2 = getOrCreateNode(lake.x + lakeR, lake.z, true); // East, faces Summit
@@ -930,7 +960,7 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   // Pass Gateway (Town 6, Northeast Mountain Pass)
   const pass = towns[6];
   const passCenter = townCenterIds[6];
-  const passR = pass.radius * 0.70;
+  const passR = 38.0 * scale;
   const passNode0 = getOrCreateNode(pass.x - passR, pass.z, true); // West, faces Downtown
   const passNode1 = getOrCreateNode(pass.x, pass.z + passR, true); // North, faces Summit
   const passNode2 = getOrCreateNode(pass.x + passR, pass.z, true); // East
@@ -948,20 +978,9 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
   // Summit Lookout (Town 2, Alpine Peak)
   const sum = towns[2];
   const sumCenter = townCenterIds[2];
-  const sumR = sum.radius * 0.65;
-  // Convex loop ordered counter-clockwise with gateways at exterior facing vertices
-  const sumGwPass = getOrCreateNode(sum.x - sumR, sum.z + 10.0 * scale, true); // West
-  const sumNorth = getOrCreateNode(sum.x, sum.z + sumR, true);                  // North, faces Pass Gateway
-  const sumEast = getOrCreateNode(sum.x + sumR, sum.z, true);                   // East
-  const sumSouth = getOrCreateNode(sum.x, sum.z - sumR, true);                  // South
-  const sumGwLake = getOrCreateNode(sum.x - sumR * 0.7, sum.z - sumR * 0.7, true); // Southwest, faces Lakeside
-
-  addEdge(sumGwPass, sumNorth, RoadClass.MOUNTAIN);
-  addEdge(sumNorth, sumEast, RoadClass.MOUNTAIN);
-  addEdge(sumEast, sumSouth, RoadClass.MOUNTAIN);
-  addEdge(sumSouth, sumGwLake, RoadClass.MOUNTAIN);
-  addEdge(sumGwLake, sumGwPass, RoadClass.MOUNTAIN);
-  addEdge(sumCenter, sumGwPass, RoadClass.MOUNTAIN);
+  // Scenic ridge lookout spur extending along the mountain contour
+  const sumLookout = getOrCreateNode(sum.x - 25.0 * scale, sum.z + 20.0 * scale, false);
+  addEdge(sumCenter, sumLookout, RoadClass.MOUNTAIN);
 
   // ── 3. Planar Regional Inter-Town Road Network ───────────────
   const interTownLinks: Array<{
@@ -997,24 +1016,29 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
     // 12. Mountain Route 1: Pass Gateway -> Summit Lookout [Alpine Switchbacks]
     {
       fromId: passGwSummit,
-      toId: sumNorth,
+      toId: sumCenter,
       roadClass: RoadClass.MOUNTAIN,
       extraWaypoints: [
-        { x: 530 * scale, z: 660 * scale },
-        { x: 600 * scale, z: 700 * scale },
-        { x: 650 * scale, z: 690 * scale },
+        { x: 450 * scale, z: 600 * scale },
+        { x: 430 * scale, z: 670 * scale },
+        { x: 500 * scale, z: 680 * scale },
+        { x: 560 * scale, z: 720 * scale },
+        { x: 630 * scale, z: 730 * scale },
+        { x: 690 * scale, z: 700 * scale },
+        { x: 705 * scale, z: 650 * scale },
       ],
     },
     // 13. Mountain Route 2: Lakeside -> Summit Lookout [Ridge Scenic Trail]
     {
       fromId: lakeGwSummit,
-      toId: sumGwLake,
+      toId: sumCenter,
       roadClass: RoadClass.MOUNTAIN,
       extraWaypoints: [
-        { x: 570 * scale, z: -150 * scale },
-        { x: 610 * scale, z: 100 * scale },
-        { x: 640 * scale, z: 320 * scale },
-        { x: 655 * scale, z: 480 * scale },
+        { x: 500 * scale, z: -180 * scale },
+        { x: 540 * scale, z: 0 * scale },
+        { x: 580 * scale, z: 180 * scale },
+        { x: 620 * scale, z: 360 * scale },
+        { x: 655 * scale, z: 490 * scale },
       ],
     },
   ];
@@ -1032,21 +1056,24 @@ export function generateRoadNetwork(spec: WorldSpec, landforms?: Landforms): Roa
     }
     rawPath.push({ x: nB.x, z: nB.z });
 
-    const splinePoints = sampleSplinePoints(rawPath, link.roadClass, lf);
+    const splinePoints = sampleSplinePoints(rawPath, link.roadClass, lf, nA.elevation, nB.elevation);
 
     // Subdivide into segments of ~60m with intermediate waypoint nodes
     const segmentInterval = 5;
     let prevNodeId = link.fromId;
+    let prevIdx = 0;
 
     for (let p = segmentInterval; p < splinePoints.length - 1; p += segmentInterval) {
       const pt = splinePoints[p];
-      const nextNodeId = getOrCreateNode(pt.x, pt.z, true);
-      const subSlice = splinePoints.slice(p - segmentInterval, p + 1);
+      const nextNodeId = getOrCreateNode(pt.x, pt.z, false);
+      nodes[nextNodeId].elevation = pt.elevation;
+      const subSlice = splinePoints.slice(prevIdx, p + 1);
       addEdge(prevNodeId, nextNodeId, link.roadClass, subSlice);
       prevNodeId = nextNodeId;
+      prevIdx = p;
     }
 
-    const lastSlice = splinePoints.slice(Math.max(0, splinePoints.length - segmentInterval - 1));
+    const lastSlice = splinePoints.slice(prevIdx);
     addEdge(prevNodeId, link.toId, link.roadClass, lastSlice);
   }
 

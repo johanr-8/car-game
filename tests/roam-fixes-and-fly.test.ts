@@ -199,4 +199,78 @@ describe('Free Roam Fixes & Spectator Fly Mode', () => {
       expect(fly.pitch).toBeGreaterThanOrEqual(-1.52);
     });
   });
+
+  describe('Post-Review Free Roam Fixes Verification', () => {
+    it('populates Downtown city blocks with skyscrapers (no empty grid)', () => {
+      const roamWorld = new RoamWorld();
+      const generator = roamWorld.propsGenerator;
+
+      // Sample core Downtown chunks: (0, 0), (0, -1), (-1, 0), (-1, -1)
+      let downtownBuildings = 0;
+      for (const [cx, cz] of [[0, 0], [0, -1], [-1, 0], [-1, -1]]) {
+        const props = generator.generateChunkProps(cx, cz);
+        for (const b of props.buildings) {
+          if (b.box.height >= 50) {
+            downtownBuildings++;
+          }
+        }
+      }
+
+      // Must have at least 8 skyscrapers in the core 4 chunks
+      expect(downtownBuildings).toBeGreaterThanOrEqual(8);
+      roamWorld.dispose();
+    });
+
+    it('guarantees zero houses or buildings on steep mountain slopes and alpine crags', () => {
+      const roamWorld = new RoamWorld();
+      const generator = roamWorld.propsGenerator;
+      const lf = roamWorld.terrainHeight.landforms!;
+
+      // Sample mountain chunks (cx: 3..6, cz: 3..6)
+      for (let cx = 3; cx <= 6; cx++) {
+        for (let cz = 3; cz <= 6; cz++) {
+          const props = generator.generateChunkProps(cx, cz);
+          for (const b of props.buildings) {
+            const slope = lf.getSlope(b.box.x, b.box.z);
+            expect(slope).toBeLessThanOrEqual(0.16);
+            expect(b.box.y).toBeLessThan(120); // No houses on summit peak
+          }
+        }
+      }
+      roamWorld.dispose();
+    });
+
+    it('guarantees mountain road elevations are continuous with zero mid-air drops', () => {
+      const roamWorld = new RoamWorld();
+      const graph = roamWorld.roadIndex.graph;
+
+      // For every edge meeting at a node, edge endpoints must match node elevation within 0.1m
+      for (const edge of graph.edges) {
+        if (edge.points && edge.points.length > 1) {
+          const fromN = graph.nodes[edge.fromNodeId];
+          const toN = graph.nodes[edge.toNodeId];
+          const pStart = edge.points[0];
+          const pEnd = edge.points[edge.points.length - 1];
+
+          expect(Math.abs(pStart.elevation - fromN.elevation)).toBeLessThan(0.1);
+          expect(Math.abs(pEnd.elevation - toN.elevation)).toBeLessThan(0.1);
+        }
+      }
+      roamWorld.dispose();
+    });
+
+    it('does not treat gentle terrain as a blocking wall obstacle during motion sweeps', () => {
+      const roamWorld = new RoamWorld();
+      const hit = { hit: false, point: new THREE.Vector3(), normal: new THREE.Vector3(), distance: 0 };
+
+      // Query horizontally across a gentle meadow hill at (0, 0)
+      const origin = new THREE.Vector3(0, roamWorld.terrainHeight.groundHeightAt(0, 0) + 0.25, 0);
+      const forwardDir = new THREE.Vector3(0, 0, 1);
+      const didHit = roamWorld.raycast(origin, forwardDir, 1.5, hit);
+
+      // Horizontal ray over gentle terrain must NOT report a wall barrier collision
+      expect(didHit).toBe(false);
+      roamWorld.dispose();
+    });
+  });
 });

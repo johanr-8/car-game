@@ -15,6 +15,7 @@
  */
 import * as THREE from 'three';
 import type { WorldSpec } from './WorldConfig';
+import { BiomeType } from './WorldConfig';
 import type { SpatialRoadIndex } from './RoadNetwork';
 import { RoadClass } from './RoadNetwork';
 import type { TerrainHeight } from './TerrainHeight';
@@ -167,19 +168,52 @@ export class CityPropsGenerator {
     const originX = cx * chunkSize;
     const originZ = cz * chunkSize;
 
-    // Dense grid spacing based on district footprint (ensures rich streetscape)
-    const step = district.type === DistrictType.SUBURBAN ? 22 : district.type === DistrictType.INDUSTRIAL ? 40 : 28;
-    const margin = 14;
+    // For Downtown, candidate lot centers correspond to the 64m block interiors
+    // In each 128m chunk, blocks are centered at origin + 32m and origin + 96m
+    const isDowntown = district.type === DistrictType.DOWNTOWN;
+    const xCandidates: number[] = [];
+    const zCandidates: number[] = [];
 
-    for (let x = originX + margin; x <= originX + chunkSize - margin; x += step) {
+    if (isDowntown) {
+      xCandidates.push(originX + 32, originX + 96);
+      zCandidates.push(originZ + 32, originZ + 96);
+    } else {
+      const step = district.type === DistrictType.SUBURBAN ? 22 : district.type === DistrictType.INDUSTRIAL ? 40 : 28;
+      const margin = 14;
+      for (let x = originX + margin; x <= originX + chunkSize - margin; x += step) {
+        xCandidates.push(x);
+      }
       for (let z = originZ + margin; z <= originZ + chunkSize - margin; z += step) {
-        // Small organic jitter within lot cell
-        const lotX = x + rng.range(-2.5, 2.5);
-        const lotZ = z + rng.range(-2.5, 2.5);
+        zCandidates.push(z);
+      }
+    }
+
+    for (let xi = 0; xi < xCandidates.length; xi++) {
+      for (let zi = 0; zi < zCandidates.length; zi++) {
+        const x = xCandidates[xi];
+        const z = zCandidates[zi];
+        const lotX = isDowntown ? x : (x + rng.range(-2.5, 2.5));
+        const lotZ = isDowntown ? z : (z + rng.range(-2.5, 2.5));
 
         // Never place buildings underwater or in the ocean/lake
         if (this.terrainHeight.landforms && this.terrainHeight.landforms.isUnderwater(lotX, lotZ)) {
           continue;
+        }
+
+        // Mountain, slope & biome checks: NO houses or lots on mountains, rocky crags, or steep terrain!
+        if (this.terrainHeight.landforms) {
+          const lf = this.terrainHeight.landforms;
+          const slope = lf.getSlope(lotX, lotZ);
+          if (slope > 0.16) {
+            continue; // Too steep for buildings/houses!
+          }
+          if (lf.getBiome(lotX, lotZ) === BiomeType.ROCK) {
+            continue; // Rock biome: no buildings!
+          }
+          const groundElev = this.terrainHeight.groundHeightAt(lotX, lotZ);
+          if (district.type === DistrictType.SUBURBAN && groundElev > 50.0) {
+            continue; // No suburban houses on mountain elevations!
+          }
         }
 
         // Keep 30m safe clearance around vehicle spawn point
@@ -198,15 +232,25 @@ export class CityPropsGenerator {
         if (!nearest) continue;
 
         // Size & Footprint
-        const lotSize = Math.round(rng.range(district.minLotSize, district.maxLotSize));
-        const width = lotSize;
-        const depth = lotSize;
-        const lotRadius = Math.hypot(width * 0.5, depth * 0.5);
+        let lotSize = Math.round(rng.range(district.minLotSize, district.maxLotSize));
+        let width = lotSize;
+        let depth = lotSize;
+        let lotRadius = Math.hypot(width * 0.5, depth * 0.5);
+
+        // Check if lot fits with setback; if slightly too large, scale down to fit
+        const maxAvailableRadius = nearest.distance - nearest.roadHalfWidth - district.setback;
+        if (maxAvailableRadius < 5.0) continue;
+        if (lotRadius > maxAvailableRadius) {
+          const maxW = Math.floor(maxAvailableRadius / 0.7071);
+          if (maxW < 8) continue;
+          width = Math.min(width, maxW);
+          depth = width;
+          lotRadius = Math.hypot(width * 0.5, depth * 0.5);
+        }
 
         // Strict road clearance check:
-        // Distance to road centerline MUST exceed roadHalfWidth + lotRadius + setback
-        const requiredClearance = nearest.roadHalfWidth + lotRadius + district.setback;
-        if (nearest.distance < requiredClearance) {
+        // Distance to road centerline MUST exceed roadHalfWidth + lotRadius
+        if (nearest.distance < nearest.roadHalfWidth + lotRadius) {
           continue; // REJECT: Overlaps road or road buffer
         }
 

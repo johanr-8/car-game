@@ -70,7 +70,9 @@ export class TerrainHeight {
     const nodes = this.graph.nodes;
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
-      node.elevation = this.landforms.getHeight(node.x, node.z);
+      if (node.elevation === undefined || isNaN(node.elevation)) {
+        node.elevation = this.landforms.getHeight(node.x, node.z);
+      }
     }
   }
 

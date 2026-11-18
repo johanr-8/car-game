@@ -155,8 +155,8 @@ export class ArcadeCarController {
         this.currentSurfaceType = SurfaceType.ASPHALT;
       }
 
-      // In Free Roam: slopes steeper than ~40 degrees (normal.y < 0.766) are treated as solid walls, not drivable ground
-      if (collision.getSurfaceTypeAt && _hitDown.normal.y < 0.766 && _hitDown.normal.y > 0) {
+      // In Free Roam: slopes steeper than ~50 degrees (normal.y < 0.64) are treated as solid cliff walls, not drivable ground
+      if (collision.getSurfaceTypeAt && _hitDown.normal.y < 0.64 && _hitDown.normal.y > 0) {
         this.position.addScaledVector(_hitDown.normal, 0.12);
         this.velocity.projectOnPlane(_hitDown.normal);
         this.speed *= 0.85;
@@ -432,8 +432,8 @@ export class ArcadeCarController {
         if (hitObstacle && _hitFwd.distance < sweepDist) {
           const wallNormal = _hitFwd.normal;
           const slopeDot = wallNormal.dot(this.surfaceNormal);
-          // In Free Roam: slopes steeper than ~40 degrees (normal.y < 0.766) are steep cliffs/walls, not climbable ramps
-          const isSteepTerrain = (collision.getSurfaceTypeAt !== undefined) && (wallNormal.y < 0.766 && wallNormal.y > 0);
+          // In Free Roam: slopes steeper than ~50 degrees (normal.y < 0.64) are steep cliffs/walls, not climbable ramps
+          const isSteepTerrain = (collision.getSurfaceTypeAt !== undefined) && (wallNormal.y < 0.64 && wallNormal.y > 0);
 
           if (slopeDot > 0.15 && !isSteepTerrain) {
             // Upcoming climbable ramp or incline curve!

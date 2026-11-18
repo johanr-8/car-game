@@ -650,6 +650,7 @@ export class TerrainChunk {
     const maxChunkZ = (cz + 1) * chunkSize + 4;
 
     const nodes = roadIndex.graph.nodes;
+    const landforms = terrainHeight.landforms;
 
     // ── 1. Build Road Polylines & Draped Ribbons ──────────────
     for (let i = 0; i < edges.length; i++) {
@@ -821,13 +822,18 @@ export class TerrainChunk {
       const node = nodes[i];
       if (node.x >= minChunkX && node.x <= maxChunkX && node.z >= minChunkZ && node.z <= maxChunkZ) {
         if (node.isJunction) {
-          const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
-          const patchGeo = new THREE.CircleGeometry(11.0, 16);
-          patchGeo.rotateX(-Math.PI * 0.5);
-          const patchMesh = new THREE.Mesh(patchGeo, asphaltAvenueMat);
-          patchMesh.position.set(node.x, patchY, node.z);
-          patchMesh.receiveShadow = true;
-          this.roadGroup.add(patchMesh);
+          // Only place flat intersection deck patches on relatively flat terrain (slope < 0.06)
+          // Never place on mountain roads or slopes where the circle would float into thin air!
+          const slope = landforms ? landforms.getSlope(node.x, node.z) : 0;
+          if (slope < 0.06) {
+            const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
+            const patchGeo = new THREE.CircleGeometry(8.0, 16);
+            patchGeo.rotateX(-Math.PI * 0.5);
+            const patchMesh = new THREE.Mesh(patchGeo, asphaltAvenueMat);
+            patchMesh.position.set(node.x, patchY, node.z);
+            patchMesh.receiveShadow = true;
+            this.roadGroup.add(patchMesh);
+          }
         } else if (node.isRoundabout) {
           const patchY = terrainHeight.groundHeightAt(node.x, node.z) + 0.02;
           const outerGeo = new THREE.RingGeometry(6.0, 16.0, 24);
